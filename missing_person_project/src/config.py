@@ -27,7 +27,7 @@ class Settings:
 
     # Face detection and matching
     model_preference: str = "auto"  # auto, cnn, hog
-    upsample_times: int = 0
+    upsample_times: int = 2
     confidence_threshold: float = 0.60
 
     # Stability and anti-spam

@@ -64,7 +64,41 @@ class FaceEngine:
         encodings = face_recognition.face_encodings(image, known_face_locations=locations)
 
         if not encodings:
-            raise ValueError("No face found in missing.jpg. Provide a clear frontal face image.")
+            # Fallback for low-resolution references: try enhanced variants.
+            bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            variants: list[np.ndarray] = []
+            for scale in (2, 3, 4):
+                up = cv2.resize(
+                    bgr,
+                    None,
+                    fx=scale,
+                    fy=scale,
+                    interpolation=cv2.INTER_CUBIC,
+                )
+                variants.append(cv2.cvtColor(up, cv2.COLOR_BGR2RGB))
+
+                gray = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY)
+                eq = cv2.equalizeHist(gray)
+                variants.append(cv2.cvtColor(eq, cv2.COLOR_GRAY2RGB))
+
+            for variant in variants:
+                v_locations = face_recognition.face_locations(
+                    variant,
+                    number_of_times_to_upsample=self.upsample_times,
+                    model=self.model,
+                )
+                v_encodings = face_recognition.face_encodings(
+                    variant,
+                    known_face_locations=v_locations,
+                )
+                if v_encodings:
+                    encodings = v_encodings
+                    break
+
+        if not encodings:
+            raise ValueError(
+                "No face found in missing.jpg. Provide a clear frontal face image."
+            )
 
         if len(encodings) > 1:
             print("Warning: Multiple faces in missing.jpg. Using first detected face.")
