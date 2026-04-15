@@ -71,7 +71,7 @@ def find_best_match(reference: np.ndarray, locations: List[Tuple[int, int, int, 
 
 
 # --- Video Processor ---
-def process_video_feed(video_path: str, camera_id: str, target_encoding: np.ndarray, skip_frames=2) -> List[Dict[str, Any]]:
+def process_video_feed(video_path: str, camera_id: str, target_encoding: np.ndarray, skip_frames=None) -> List[Dict[str, Any]]:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise Exception(f"Cannot open video {video_path}")
@@ -79,6 +79,9 @@ def process_video_feed(video_path: str, camera_id: str, target_encoding: np.ndar
     fps = cap.get(cv2.CAP_PROP_FPS)
     if fps == 0 or math.isnan(fps):
         fps = 30.0
+
+    if skip_frames is None:
+        skip_frames = max(1, int(fps / 2)) # Check 2 frames per second
 
     frame_index = 0
     consecutive_matches = 0
@@ -97,6 +100,13 @@ def process_video_feed(video_path: str, camera_id: str, target_encoding: np.ndar
         frame_index += 1
         if frame_index % skip_frames != 0:
             continue
+
+        # Resize drastically for performance
+        height, width = frame.shape[:2]
+        max_height = 480
+        if height > max_height:
+            scale = max_height / height
+            frame = cv2.resize(frame, (int(width * scale), max_height))
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         locs = face_recognition.face_locations(rgb, model="hog")

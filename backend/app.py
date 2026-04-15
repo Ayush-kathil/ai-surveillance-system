@@ -40,9 +40,9 @@ async def analyze_surveillance(
             shutil.copyfileobj(cam2_video.file, buffer)
 
         # Process Camera 1
-        results1 = process_video_feed(cam1_path, "CAM-1", target_encoding, skip_frames=5)
+        results1 = process_video_feed(cam1_path, "CAM-1", target_encoding)
         # Process Camera 2
-        results2 = process_video_feed(cam2_path, "CAM-2", target_encoding, skip_frames=5)
+        results2 = process_video_feed(cam2_path, "CAM-2", target_encoding)
 
         # Cleanup
         shutil.rmtree(temp_dir, ignore_errors=True)
