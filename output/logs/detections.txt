@@ -1,4 +1,46 @@
 ======================================================================
 Missing Person Detection Log
-Session Start: 2026-04-15 14:49:49
+Session Start: 2026-04-15 14:52:47
 ======================================================================
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:53:22 | Confidence: 83.36% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145322_491554.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:53:44 | Confidence: 83.87% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145344_175095.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:54:04 | Confidence: 83.46% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145404_565644.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:54:24 | Confidence: 84.49% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145424_535375.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:54:45 | Confidence: 85.79% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145445_898188.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:55:09 | Confidence: 84.49% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145509_085491.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:55:29 | Confidence: 84.12% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145529_965815.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:55:53 | Confidence: 85.03% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145553_983790.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:56:17 | Confidence: 84.03% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145617_199112.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:56:37 | Confidence: 83.23% | Snapshot: C:\Users\donay\Documents\GIT HUB\surveillance system\output\snapshots\CAM-1_20260415_145637_968486.jpg
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:57:00 | Confidence: 82.87%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:57:19 | Confidence: 83.96%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:57:39 | Confidence: 83.17%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:57:59 | Confidence: 85.96%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:58:20 | Confidence: 84.78%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:58:42 | Confidence: 83.85%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:59:04 | Confidence: 83.21%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:59:24 | Confidence: 84.37%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 14:59:44 | Confidence: 82.97%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:00:04 | Confidence: 84.30%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:00:24 | Confidence: 85.13%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:00:41 | Confidence: 83.61%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:01:02 | Confidence: 83.29%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:01:21 | Confidence: 83.38%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:01:40 | Confidence: 84.90%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:01:59 | Confidence: 84.27%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:02:17 | Confidence: 87.29%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:02:35 | Confidence: 86.20%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:02:54 | Confidence: 86.13%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:03:13 | Confidence: 84.10%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:03:30 | Confidence: 84.65%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:03:50 | Confidence: 86.10%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:04:11 | Confidence: 85.92%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:04:31 | Confidence: 86.77%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:04:51 | Confidence: 84.53%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:05:10 | Confidence: 87.09%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:05:28 | Confidence: 85.03%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:05:47 | Confidence: 84.49%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:06:07 | Confidence: 85.35%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:06:25 | Confidence: 84.45%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:06:43 | Confidence: 86.31%
+ALERT | Match Found | Camera: CAM-1 | Timestamp: 2026-04-15 15:07:03 | Confidence: 84.59%
