@@ -56,6 +56,7 @@ def run() -> None:
             initial_frame_skip=settings.initial_frame_skip,
             max_frame_skip=settings.max_frame_skip,
             target_processing_ms=settings.target_processing_ms,
+            process_scale=settings.process_scale,
             show_window=settings.show_windows,
             window_wait_ms=settings.window_wait_ms,
             stop_event=stop_event,

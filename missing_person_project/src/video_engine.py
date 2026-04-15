@@ -38,6 +38,7 @@ class VideoEngine:
         initial_frame_skip: int,
         max_frame_skip: int,
         target_processing_ms: float,
+        process_scale: float,
         show_window: bool,
         window_wait_ms: int,
         stop_event: Event,
@@ -56,6 +57,7 @@ class VideoEngine:
         self.frame_skip = max(1, initial_frame_skip)
         self.max_frame_skip = max(self.frame_skip, max_frame_skip)
         self.target_processing_ms = target_processing_ms
+        self.process_scale = min(1.0, max(0.1, process_scale))
 
         self.show_window = show_window
         self.window_wait_ms = max(1, window_wait_ms)
@@ -104,7 +106,18 @@ class VideoEngine:
                 cv2.destroyWindow(window_name)
 
     def _process_frame(self, frame: np.ndarray, cap: cv2.VideoCapture) -> None:
-        locations, encodings = self.face_engine.detect_and_encode(frame)
+        if self.process_scale < 1.0:
+            proc_frame = cv2.resize(
+                frame,
+                None,
+                fx=self.process_scale,
+                fy=self.process_scale,
+                interpolation=cv2.INTER_LINEAR,
+            )
+        else:
+            proc_frame = frame
+
+        locations, encodings = self.face_engine.detect_and_encode(proc_frame)
         best = self.face_engine.find_best_match(self.reference_encoding, locations, encodings)
 
         if best is None:
@@ -125,9 +138,13 @@ class VideoEngine:
         else:
             self._consecutive_hits = 0
 
+        location = best.location
+        if self.process_scale < 1.0:
+            location = self._rescale_location(best.location)
+
         color = (0, 0, 255) if hit else (0, 165, 255)
         label = f"score={best.weighted_score:.2f} stable={self._consecutive_hits}/{self.stability_frames}"
-        self.face_engine.draw_label(frame, best.location, label, color)
+        self.face_engine.draw_label(frame, location, label, color)
 
         if not self._is_confirmed_hit(hit):
             return
@@ -137,7 +154,7 @@ class VideoEngine:
 
         self.face_engine.draw_label(
             frame,
-            best.location,
+            location,
             f"CONFIRMED {best.weighted_score:.2f} @ {video_ts}",
             (0, 0, 255),
         )
@@ -195,3 +212,13 @@ class VideoEngine:
 
         if elapsed_ms < (self.target_processing_ms * 0.60) and self.frame_skip > 1:
             self.frame_skip -= 1
+
+    def _rescale_location(self, location: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        scale = 1.0 / self.process_scale
+        top, right, bottom, left = location
+        return (
+            int(top * scale),
+            int(right * scale),
+            int(bottom * scale),
+            int(left * scale),
+        )
