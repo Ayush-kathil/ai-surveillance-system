@@ -31,6 +31,8 @@ class VideoEngine:
         alert_system: AlertSystem,
         reference_encoding: np.ndarray,
         confidence_threshold: float,
+        cosine_threshold: float,
+        euclidean_threshold: float,
         stability_frames: int,
         cooldown_seconds: int,
         initial_frame_skip: int,
@@ -46,6 +48,8 @@ class VideoEngine:
         self.reference_encoding = reference_encoding
 
         self.confidence_threshold = confidence_threshold
+        self.cosine_threshold = cosine_threshold
+        self.euclidean_threshold = euclidean_threshold
         self.stability_frames = stability_frames
         self.cooldown_delta = timedelta(seconds=cooldown_seconds)
 
@@ -107,14 +111,22 @@ class VideoEngine:
             self._consecutive_hits = 0
             return
 
-        hit = best.similarity >= self.confidence_threshold
+        # Use weighted score as primary metric, with thresholds as backup
+        hit = (
+            best.weighted_score >= self.confidence_threshold
+            or (
+                best.cosine_similarity >= self.cosine_threshold
+                and best.euclidean_distance <= self.euclidean_threshold
+            )
+        )
+        
         if hit:
             self._consecutive_hits += 1
         else:
             self._consecutive_hits = 0
 
         color = (0, 0, 255) if hit else (0, 165, 255)
-        label = f"sim={best.similarity:.2f} stable={self._consecutive_hits}/{self.stability_frames}"
+        label = f"score={best.weighted_score:.2f} stable={self._consecutive_hits}/{self.stability_frames}"
         self.face_engine.draw_label(frame, best.location, label, color)
 
         if not self._is_confirmed_hit(hit):
@@ -126,14 +138,17 @@ class VideoEngine:
         self.face_engine.draw_label(
             frame,
             best.location,
-            f"CONFIRMED {best.similarity:.2f} @ {video_ts}",
+            f"CONFIRMED {best.weighted_score:.2f} @ {video_ts}",
             (0, 0, 255),
         )
         self.alert_system.emit_detection(
             camera_id=self.camera.camera_id,
-            confidence=best.similarity,
+            confidence=best.weighted_score,
+            cosine_sim=best.cosine_similarity,
+            euclidean_dist=best.euclidean_distance,
             frame=frame,
             event_time=event_time,
+            video_timestamp=video_ts,
         )
         self._last_alert_time = event_time
         self._consecutive_hits = 0

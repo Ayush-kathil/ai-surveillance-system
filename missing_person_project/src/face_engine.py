@@ -9,6 +9,7 @@ from typing import List, Tuple
 import cv2
 import face_recognition
 import numpy as np
+from scipy.spatial.distance import euclidean
 
 
 @dataclass
@@ -16,7 +17,9 @@ class FaceMatch:
     """Stores a single face match candidate."""
 
     location: Tuple[int, int, int, int]
-    similarity: float
+    cosine_similarity: float
+    euclidean_distance: float
+    weighted_score: float  # Combined metric for better accuracy
 
 
 class FaceEngine:
@@ -131,9 +134,33 @@ class FaceEngine:
         if not candidates:
             return None
 
-        similarities = [self.cosine_similarity(reference_encoding, cand) for cand in candidates]
-        best_idx = int(np.argmax(similarities))
-        return FaceMatch(location=locations[best_idx], similarity=similarities[best_idx])
+        best_idx = 0
+        best_cosine = -2.0
+        best_euclidean = float("inf")
+        best_weighted = -2.0
+
+        for idx, cand in enumerate(candidates):
+            cosine = self.cosine_similarity(reference_encoding, cand)
+            
+            # Euclidean distance in normalized space: lower is better
+            euclidean_dist = euclidean(reference_encoding, cand)
+            
+            # Weighted score: combine both metrics
+            # Cosine weight: 0.7, Euclidean weight: 0.3 (inverted for distance)
+            weighted = (cosine * 0.7) + ((1 - min(euclidean_dist / 2.0, 1.0)) * 0.3)
+            
+            if weighted > best_weighted:
+                best_weighted = weighted
+                best_idx = idx
+                best_cosine = cosine
+                best_euclidean = euclidean_dist
+
+        return FaceMatch(
+            location=locations[best_idx],
+            cosine_similarity=best_cosine,
+            euclidean_distance=best_euclidean,
+            weighted_score=best_weighted,
+        )
 
     @staticmethod
     def draw_label(

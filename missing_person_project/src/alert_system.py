@@ -55,6 +55,9 @@ class AlertSystem:
         confidence: float,
         frame: np.ndarray,
         event_time: datetime,
+        cosine_sim: float = 0.0,
+        euclidean_dist: float = 0.0,
+        video_timestamp: str = "00:00:00",
     ) -> DetectionRecord:
         snapshot_path = self.save_snapshot(camera_id, frame, event_time)
         record = DetectionRecord(
@@ -65,10 +68,13 @@ class AlertSystem:
         )
 
         line = (
-            f"ALERT | camera={record.camera_id} | "
-            f"time={record.timestamp.isoformat(sep=' ', timespec='seconds')} | "
-            f"confidence={record.confidence:.3f} | "
-            f"snapshot={record.snapshot_path}"
+            f"ALERT | {camera_id.upper()} | "
+            f"VIDEO_TIME={video_timestamp} | "
+            f"EVENT_TIME={record.timestamp.isoformat(sep=' ', timespec='seconds')} | "
+            f"SCORE={record.confidence:.3f} | "
+            f"COSINE={cosine_sim:.3f} | "
+            f"EUCLIDEAN={euclidean_dist:.3f} | "
+            f"SNAPSHOT={record.snapshot_path.name}"
         )
         with self._lock:
             print(line)

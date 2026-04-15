@@ -28,17 +28,21 @@ class Settings:
     # Face detection and matching
     model_preference: str = "auto"  # auto, cnn, hog
     upsample_times: int = 2
-    confidence_threshold: float = 0.60
+    
+    # Improved confidence thresholds
+    confidence_threshold: float = 0.55  # Weighted score threshold (lowered for better detection)
+    cosine_threshold: float = 0.50  # Additional cosine threshold
+    euclidean_threshold: float = 0.65  # Euclidean distance threshold (0-1 range)
 
     # Stability and anti-spam
-    stability_frames: int = 5
-    cooldown_seconds: int = 10
+    stability_frames: int = 3  # Reduced for faster detection (was 5)
+    cooldown_seconds: int = 5  # Reduced for more frequent alerts (was 10)
 
     # Performance controls
     use_multithreading: bool = True
-    initial_frame_skip: int = 2
-    max_frame_skip: int = 5
-    target_processing_ms: float = 80.0
+    initial_frame_skip: int = 1  # Process every frame initially
+    max_frame_skip: int = 3  # Max skip to maintain accuracy
+    target_processing_ms: float = 100.0
 
     # Display
     show_windows: bool = True

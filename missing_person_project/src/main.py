@@ -49,6 +49,8 @@ def run() -> None:
             alert_system=alert_system,
             reference_encoding=reference_encoding,
             confidence_threshold=settings.confidence_threshold,
+            cosine_threshold=settings.cosine_threshold,
+            euclidean_threshold=settings.euclidean_threshold,
             stability_frames=settings.stability_frames,
             cooldown_seconds=settings.cooldown_seconds,
             initial_frame_skip=settings.initial_frame_skip,
