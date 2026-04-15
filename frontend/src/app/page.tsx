@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Image from "next/image";
 
 type Detection = {
   camera: string;
@@ -18,6 +17,31 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [results, setResults] = useState<Detection[]>([]);
+  const [backendStatus, setBackendStatus] = useState<"connecting" | "online" | "offline">("connecting");
+
+  // Check backend health
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const res = await fetch("http://localhost:8001/health");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "Online") {
+            setBackendStatus("online");
+          } else {
+            setBackendStatus("offline");
+          }
+        } else {
+          setBackendStatus("offline");
+        }
+      } catch {
+        setBackendStatus("offline");
+      }
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Poll alerts rapidly when session is active
   useEffect(() => {
@@ -65,8 +89,8 @@ export default function Home() {
 
       const data = await response.json();
       setSessionId(data.session_id);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setLoading(false);
     }
@@ -77,9 +101,26 @@ export default function Home() {
       <div className="w-full max-w-6xl space-y-8">
         
         {/* Header */}
-        <header className="flex flex-col gap-2 border-b-2 border-black pb-6">
-          <h1 className="text-4xl font-extrabold tracking-tight">Surveillance Command Center</h1>
-          <p className="text-lg text-gray-600">YOLOv8 Accelerated Person Detection + Real-Time Video Overlays.</p>
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-2 border-black pb-6">
+          <div className="flex flex-col gap-2">
+            <h1 className="text-4xl font-extrabold tracking-tight">Surveillance Command Center</h1>
+            <p className="text-lg text-gray-600">YOLOv8 Accelerated Person Detection + Real-Time Video Overlays.</p>
+          </div>
+          
+          <div className={`flex items-center gap-3 px-4 py-2 rounded-full border-2 font-bold transition-all ${
+            backendStatus === "online" ? "border-green-500 text-green-700 bg-green-50" : 
+            backendStatus === "offline" ? "border-red-500 text-red-700 bg-red-50" : 
+            "border-gray-300 text-gray-500 bg-gray-50 animate-pulse"
+          }`}>
+            <span className={`w-3 h-3 rounded-full ${
+              backendStatus === "online" ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" : 
+              backendStatus === "offline" ? "bg-red-500" : 
+              "bg-gray-400"
+            }`}></span>
+            {backendStatus === "online" ? "ENGINE ONLINE" : 
+             backendStatus === "offline" ? "ENGINE OFFLINE" : 
+             "CONNECTING..."}
+          </div>
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -144,9 +185,15 @@ export default function Home() {
                 <h3 className="font-bold text-lg">CAM-1 Stream (2x Speed)</h3>
                 <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden border-4 border-gray-900 shadow-xl flex items-center justify-center">
                   {sessionId ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
                     <img src={`http://localhost:8001/api/stream/${sessionId}/CAM-1`} alt="CAM-1 Live Feed" className="w-full h-full object-cover" />
                   ) : (
-                    <span className="text-gray-500 font-medium">Awaiting Connection...</span>
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="text-gray-500 font-medium">
+                        {backendStatus === "online" ? "System Ready" : "Awaiting Backend..."}
+                      </span>
+                      {backendStatus === "online" && <span className="text-xs text-gray-600">Upload feeds to begin</span>}
+                    </div>
                   )}
                 </div>
               </div>
@@ -155,9 +202,15 @@ export default function Home() {
                 <h3 className="font-bold text-lg">CAM-2 Stream (2x Speed)</h3>
                 <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden border-4 border-gray-900 shadow-xl flex items-center justify-center">
                   {sessionId ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
                     <img src={`http://localhost:8001/api/stream/${sessionId}/CAM-2`} alt="CAM-2 Live Feed" className="w-full h-full object-cover" />
                   ) : (
-                    <span className="text-gray-500 font-medium">Awaiting Connection...</span>
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="text-gray-500 font-medium">
+                        {backendStatus === "online" ? "System Ready" : "Awaiting Backend..."}
+                      </span>
+                      {backendStatus === "online" && <span className="text-xs text-gray-600">Upload feeds to begin</span>}
+                    </div>
                   )}
                 </div>
               </div>
