@@ -27,14 +27,19 @@ def _validate_sources(video_sources: List[Path]) -> List[Path]:
 
 def run_system() -> None:
     print("Starting Missing Person Detection System...")
-    print(f"Target image: {config.MISSING_PERSON_IMAGE}")
+    
+    if not config.MISSING_PERSON_IMAGE.exists():
+        print(f"Fatal error: Missing person image not found: {config.MISSING_PERSON_IMAGE}")
+        print("Please place 'missing.jpg' in the root directory.")
+        return
 
+    print(f"Target image: {config.MISSING_PERSON_IMAGE}")
     target_encoding = load_missing_person_encoding(
         image_path=config.MISSING_PERSON_IMAGE,
         model=config.FACE_DETECTION_MODEL,
         upsample_times=config.UPSAMPLE_TIMES,
     )
-    print("Missing person face encoding loaded.")
+    print("Missing person face encoding loaded and normalized.")
 
     video_sources = _validate_sources(config.VIDEO_SOURCES)
     alert_manager = AlertManager(config.LOG_FILE)
@@ -50,7 +55,6 @@ def run_system() -> None:
                 alert_manager=alert_manager,
                 model=config.FACE_DETECTION_MODEL,
                 upsample_times=config.UPSAMPLE_TIMES,
-                tolerance=config.FACE_MATCH_TOLERANCE,
                 frame_skip=config.FRAME_SKIP,
                 show_window=config.SHOW_WINDOWS,
                 realtime_delay_ms=config.REALTIME_DELAY_MS,
@@ -85,4 +89,5 @@ if __name__ == "__main__":
         print("Stopped by user.")
     except Exception as exc:
         cv2.destroyAllWindows()
-        print(f"Fatal error: {exc}")
+        import traceback
+        traceback.print_exc()

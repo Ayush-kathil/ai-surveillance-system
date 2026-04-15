@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Event
 from typing import Optional
@@ -11,8 +11,9 @@ from typing import Optional
 import cv2
 import numpy as np
 
+import config
 from alerts import AlertManager
-from face_utils import detect_and_encode_faces, draw_face_annotation, match_face
+from face_utils import detect_and_encode_faces, draw_face_annotation, find_best_match
 
 
 @dataclass
@@ -31,7 +32,6 @@ class VideoProcessor:
         alert_manager: AlertManager,
         model: str,
         upsample_times: int,
-        tolerance: float,
         frame_skip: int,
         show_window: bool,
         realtime_delay_ms: int,
@@ -44,7 +44,6 @@ class VideoProcessor:
         self.alert_manager = alert_manager
         self.model = model
         self.upsample_times = upsample_times
-        self.tolerance = tolerance
         self.frame_skip = max(1, frame_skip)
         self.show_window = show_window
         self.realtime_delay_ms = max(1, realtime_delay_ms)
@@ -52,6 +51,9 @@ class VideoProcessor:
         self.max_snapshots = max_snapshots
         self.stop_event = stop_event
         self._snapshot_count = 0
+
+        self.consecutive_matches = 0
+        self.last_alert_time = datetime.min
 
     def run(self) -> None:
         cap = cv2.VideoCapture(str(self.camera.source))
@@ -95,34 +97,41 @@ class VideoProcessor:
             upsample_times=self.upsample_times,
         )
 
-        if not encodings:
-            return
+        match = find_best_match(self.target_encoding, locations, encodings)
 
-        for location, face_encoding in zip(locations, encodings):
-            matched, confidence = match_face(
-                self.target_encoding,
-                face_encoding,
-                tolerance=self.tolerance,
-            )
-            if not matched:
-                continue
+        is_match = False
+        if match:
+            if match.weighted_score >= config.CONFIDENCE_THRESHOLD and \
+               match.cosine_similarity >= config.COSINE_THRESHOLD and \
+               match.euclidean_distance <= config.EUCLIDEAN_THRESHOLD:
+                is_match = True
 
-            timestamp = datetime.now()
-            label = f"MATCH {confidence:.1%}"
-            draw_face_annotation(frame, location, label=label)
+        if is_match and match:
+            self.consecutive_matches += 1
+            label = f"MATCH {match.weighted_score:.1%}"
+            draw_face_annotation(frame, match.location, label=label, color=(0, 255, 0))
 
-            snapshot_path: Optional[Path] = None
-            if self._snapshot_count < self.max_snapshots:
-                self.snapshot_dir.mkdir(parents=True, exist_ok=True)
-                snapshot_path = self.snapshot_dir / (
-                    f"{self.camera.camera_id}_{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-                )
-                cv2.imwrite(str(snapshot_path), frame)
-                self._snapshot_count += 1
+            if self.consecutive_matches >= config.STABILITY_FRAMES:
+                now = datetime.now()
+                cooldown_delta = timedelta(seconds=config.COOLDOWN_SECONDS)
+                if now - self.last_alert_time >= cooldown_delta:
+                    # Trigger alert
+                    self.last_alert_time = now
+                    
+                    snapshot_path: Optional[Path] = None
+                    if self._snapshot_count < self.max_snapshots:
+                        self.snapshot_dir.mkdir(parents=True, exist_ok=True)
+                        snapshot_path = self.snapshot_dir / (
+                            f"{self.camera.camera_id}_{now.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+                        )
+                        cv2.imwrite(str(snapshot_path), frame)
+                        self._snapshot_count += 1
 
-            self.alert_manager.alert_match(
-                camera_id=self.camera.camera_id,
-                timestamp=timestamp,
-                confidence=confidence,
-                snapshot_path=snapshot_path,
-            )
+                    self.alert_manager.alert_match(
+                        camera_id=self.camera.camera_id,
+                        timestamp=now,
+                        confidence=match.weighted_score,
+                        snapshot_path=snapshot_path,
+                    )
+        else:
+            self.consecutive_matches = max(0, self.consecutive_matches - 1)

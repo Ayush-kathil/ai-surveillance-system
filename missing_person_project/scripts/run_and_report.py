@@ -32,6 +32,30 @@ def _to_min_sec(video_time: str) -> str:
     return f"{mins}:{secs:02d}"
 
 
+def _time_to_seconds(time_value: str) -> int | None:
+    value = time_value.strip()
+    if not value:
+        return None
+
+    hhmmss = value.split(":")
+    if len(hhmmss) == 3:
+        try:
+            hh, mm, ss = [int(p) for p in hhmmss]
+        except ValueError:
+            return None
+        return (hh * 3600) + (mm * 60) + ss
+
+    mmss = value.split(":")
+    if len(mmss) == 2:
+        try:
+            mm, ss = [int(p) for p in mmss]
+        except ValueError:
+            return None
+        return (mm * 60) + ss
+
+    return None
+
+
 def _parse_alerts() -> list[dict[str, str]]:
     if not LOG_FILE.exists():
         return []
@@ -56,15 +80,27 @@ def _parse_alerts() -> list[dict[str, str]]:
     return alerts
 
 
-def _best_cam1_or_first(alerts: list[dict[str, str]]) -> dict[str, str] | None:
+def _pick_alert(
+    alerts: list[dict[str, str]], target_camera: str, target_time: str | None
+) -> dict[str, str] | None:
     if not alerts:
         return None
 
-    cam1_alerts = [a for a in alerts if a.get("camera") == "CAM-1"]
-    if cam1_alerts:
-        return sorted(cam1_alerts, key=lambda x: x.get("video_time", "99:99:99"))[0]
+    camera_alerts = [a for a in alerts if a.get("camera") == target_camera]
+    selected_pool = camera_alerts if camera_alerts else alerts
 
-    return sorted(alerts, key=lambda x: x.get("video_time", "99:99:99"))[0]
+    if target_time:
+        target_seconds = _time_to_seconds(target_time)
+        if target_seconds is not None:
+            with_seconds: list[tuple[int, dict[str, str]]] = []
+            for alert in selected_pool:
+                sec = _time_to_seconds(alert.get("video_time", ""))
+                if sec is not None:
+                    with_seconds.append((sec, alert))
+            if with_seconds:
+                return min(with_seconds, key=lambda item: abs(item[0] - target_seconds))[1]
+
+    return sorted(selected_pool, key=lambda x: x.get("video_time", "99:99:99"))[0]
 
 
 def _run_detection() -> int:
@@ -90,8 +126,10 @@ def _run_detection() -> int:
     return int(result.returncode)
 
 
-def _print_summary_from_alerts(alerts: list[dict[str, str]]) -> int:
-    best = _best_cam1_or_first(alerts)
+def _print_summary_from_alerts(
+    alerts: list[dict[str, str]], target_camera: str, target_time: str | None
+) -> int:
+    best = _pick_alert(alerts, target_camera=target_camera, target_time=target_time)
 
     if best is None:
         print("No confirmed detection found in the provided videos.")
@@ -112,12 +150,23 @@ def main() -> int:
         action="store_true",
         help="Force a fresh detection run before printing summary.",
     )
+    parser.add_argument(
+        "--camera",
+        default="CAM-1",
+        help="Preferred camera in CAM-X format (default: CAM-1).",
+    )
+    parser.add_argument(
+        "--time",
+        default=None,
+        help="Preferred video time (mm:ss or hh:mm:ss), e.g. 1:01.",
+    )
     args = parser.parse_args()
+    target_camera = args.camera.strip().upper()
 
     if not args.fresh:
         cached_alerts = _parse_alerts()
         if cached_alerts:
-            return _print_summary_from_alerts(cached_alerts)
+            return _print_summary_from_alerts(cached_alerts, target_camera, args.time)
 
     run_code = _run_detection()
 
@@ -126,7 +175,7 @@ def main() -> int:
         return run_code
 
     alerts = _parse_alerts()
-    return _print_summary_from_alerts(alerts)
+    return _print_summary_from_alerts(alerts, target_camera, args.time)
 
 
 if __name__ == "__main__":
