@@ -1,138 +1,146 @@
-import cv2
-import face_recognition
-import numpy as np
-from scipy.spatial.distance import euclidean
-from typing import List, Tuple, Optional, Dict, Any
-from dataclasses import dataclass
-from datetime import timedelta
-import math
+from deepface import DeepFace
+import os
+
+# Set logging level for tensorflow to reduce noise
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+# --- Configuration ---
+RECOGNITION_MODEL = "ArcFace"  # 512-d embeddings, high accuracy
+DETECTOR_BACKEND = "retinaface" # SOTA for face detection/alignment
+DISTANCE_METRIC = "cosine"
+THRESHOLD = 0.68 # ArcFace cosine threshold (0.68 is standard for balanced)
 
 # --- Face Utilities ---
 @dataclass
 class FaceMatch:
-    location: Tuple[int, int, int, int]
-    cosine_similarity: float
-    euclidean_distance: float
-    weighted_score: float
+    location: Dict[str, int]
+    score: float
 
-def _normalize(encoding: np.ndarray) -> np.ndarray:
-    norm = float(np.linalg.norm(encoding))
-    if norm == 0.0: return encoding
-    return encoding / norm
-
-def load_encoding_from_image(image_bytes: bytes, model="hog", upsample_times=1) -> np.ndarray:
+def load_encoding_from_image(image_bytes: bytes) -> np.ndarray:
     nparr = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("Invalid image")
-        
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    locations = face_recognition.face_locations(rgb, number_of_times_to_upsample=upsample_times, model=model)
-    encodings = face_recognition.face_encodings(rgb, known_face_locations=locations)
+    
+    # Extract embedding using DeepFace
+    # enforce_detection=True ensures we only proceed if a face is found
+    try:
+        results = DeepFace.represent(
+            img_path=image, 
+            model_name=RECOGNITION_MODEL, 
+            detector_backend=DETECTOR_BACKEND,
+            enforce_detection=True,
+            align=True
+        )
+        # Returns a list of dicts. We take the first face.
+        return np.array(results[0]["embedding"])
+    except Exception as e:
+        # Fallback for low-res or difficult reference images
+        raise ValueError(f"Could not extract facial features from reference image: {str(e)}")
 
-    if not encodings:
-        # Fallback variants for low resolution
-        variants = []
-        for scale in (2, 3, 4):
-            up = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-            variants.append(cv2.cvtColor(up, cv2.COLOR_BGR2RGB))
-            gray = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY)
-            eq = cv2.equalizeHist(gray)
-            variants.append(cv2.cvtColor(eq, cv2.COLOR_GRAY2RGB))
-            
-        for var in variants:
-            locs = face_recognition.face_locations(var, number_of_times_to_upsample=upsample_times, model=model)
-            encs = face_recognition.face_encodings(var, known_face_locations=locs)
-            if encs:
-                encodings = encs
-                break
-
-    if not encodings:
-        raise ValueError("No face found in uploaded image.")
-        
-    return _normalize(encodings[0])
-
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    sim = float(np.dot(a, b))
-    return max(-1.0, min(1.0, sim))
-
-def find_best_match(reference: np.ndarray, locations: List[Tuple[int, int, int, int]], candidates: List[np.ndarray]) -> Optional[FaceMatch]:
-    if not candidates: return None
-    best_idx, best_cosine, best_euclidean, best_weighted = 0, -2.0, float('inf'), -2.0
-
-    for idx, cand in enumerate(candidates):
-        cosine = cosine_similarity(reference, cand)
-        euc_dist = euclidean(reference, cand)
-        weighted = (cosine * 0.7) + ((1 - min(euc_dist / 2.0, 1.0)) * 0.3)
-        if weighted > best_weighted:
-            best_weighted, best_idx, best_cosine, best_euclidean = weighted, idx, cosine, euc_dist
-
-    return FaceMatch(locations[best_idx], best_cosine, best_euclidean, best_weighted)
+def get_similarity(embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+    # Cosine Similarity: dot product of normalized vectors
+    # ArcFace embeddings are usually normalized, but we'll be safe
+    a = embedding1 / np.linalg.norm(embedding1)
+    b = embedding2 / np.linalg.norm(embedding2)
+    return float(np.dot(a, b))
 
 
-# --- Video Processor ---
-def process_video_feed(video_path: str, camera_id: str, target_encoding: np.ndarray, skip_frames=None) -> List[Dict[str, Any]]:
+from ultralytics import YOLO
+yolo_model = YOLO("yolov8n.pt")
+
+def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndarray, alerts_list: list):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise Exception(f"Cannot open video {video_path}")
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps == 0 or math.isnan(fps):
-        fps = 30.0
-
-    if skip_frames is None:
-        skip_frames = max(1, int(fps / 2)) # Check 2 frames per second
-
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_index = 0
-    consecutive_matches = 0
-    detections = []
-    
-    # Constants
-    CONFIDENCE_THRESHOLD = 0.55
-    STABILITY_FRAMES = 2
     COOLDOWN_SECONDS = 5
     last_alert_seconds = -10.0
     
     while True:
         ok, frame = cap.read()
         if not ok: break
-
+        
         frame_index += 1
-        if frame_index % skip_frames != 0:
+        # Skip frames for 2x performance effect
+        if frame_index % 2 != 0:
             continue
 
-        # Resize drastically for performance
         height, width = frame.shape[:2]
-        max_height = 480
-        if height > max_height:
-            scale = max_height / height
-            frame = cv2.resize(frame, (int(width * scale), max_height))
+        # 480p is a good balance for YOLO + DeepFace
+        if height > 480:
+            scale = 480 / height
+            frame = cv2.resize(frame, (int(width * scale), 480))
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        locs = face_recognition.face_locations(rgb, model="hog")
-        encs = face_recognition.face_encodings(rgb, known_face_locations=locs)
-        norm_encs = [_normalize(e) for e in encs]
+        # 1. Faster Person detection via YOLOv8
+        results = yolo_model(frame, classes=[0], verbose=False)
+        found_target = False
+        current_best = 0.0
 
-        match = find_best_match(target_encoding, locs, norm_encs)
-        is_match = False
-        if match and match.weighted_score >= CONFIDENCE_THRESHOLD:
-            is_match = True
+        for r in results:
+            for box in r.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                
+                # Expand crop slightly to give DeepFace context for alignment
+                pad = 20
+                crop = frame[max(0, y1-pad):min(y2+pad, frame.shape[0]), 
+                             max(0, x1-pad):min(x2+pad, frame.shape[1])]
+                
+                if crop.size == 0: continue
 
-        if is_match and match:
-            consecutive_matches += 1
-            if consecutive_matches >= STABILITY_FRAMES:
-                current_seconds = frame_index / fps
-                if current_seconds - last_alert_seconds >= COOLDOWN_SECONDS:
-                    last_alert_seconds = current_seconds
-                    # Format timestamp
-                    td = timedelta(seconds=int(current_seconds))
-                    detections.append({
+                # 2. Advanced Feature Extraction inside the person crop
+                color = (0, 0, 255) # Red: Unknown
+                label = "Unknown"
+                
+                try:
+                    # Use a faster detector (opencv or ssd) for the crop to maintain speed
+                    # but keep ArcFace for matching accuracy
+                    face_objs = DeepFace.represent(
+                        img_path=crop,
+                        model_name=RECOGNITION_MODEL,
+                        detector_backend="opencv", # Fast for small crops
+                        enforce_detection=False,
+                        align=True
+                    )
+                    
+                    for face in face_objs:
+                        if face["face_confidence"] < 0.6: continue
+                        
+                        current_embedding = np.array(face["embedding"])
+                        sim = get_similarity(target_encoding, current_embedding)
+                        
+                        # Threshold for ArcFace Cosine Similarity (higher is better match)
+                        if sim > 0.45: # Adjusted threshold for "Balanced" mode
+                            color = (0, 255, 0) # Green: Match
+                            label = f"TARGET {sim:.1%}"
+                            found_target = True
+                            if sim > current_best:
+                                current_best = sim
+                except:
+                    pass
+
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        if found_target:
+            current_seconds = frame_index / fps
+            if current_seconds - last_alert_seconds >= COOLDOWN_SECONDS:
+                last_alert_seconds = current_seconds
+                td = timedelta(seconds=int(current_seconds))
+                
+                if not any(a["timestamp"] == str(td) and a["camera"] == camera_id for a in alerts_list):
+                    alerts_list.append({
                         "camera": camera_id,
                         "timestamp": str(td),
-                        "score": round(match.weighted_score, 4)
+                        "score": round(current_best, 4)
                     })
-        else:
-            consecutive_matches = max(0, consecutive_matches - 1)
 
+        ret, buffer = cv2.imencode('.jpg', frame)
+        if not ret: continue
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+               
     cap.release()
-    return detections
+

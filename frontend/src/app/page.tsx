@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 
 type Detection = {
@@ -16,7 +16,25 @@ export default function Home() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<Detection[] | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [results, setResults] = useState<Detection[]>([]);
+
+  // Poll alerts rapidly when session is active
+  useEffect(() => {
+    if (!sessionId) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`http://localhost:8001/api/alerts/${sessionId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setResults(data.alerts);
+        }
+      } catch (err) {
+        console.error("Failed to poll alerts", err);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [sessionId]);
 
   const handleRunAnalysis = async () => {
     if (!missingImage || !cam1 || !cam2) {
@@ -26,7 +44,8 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
-    setResults(null);
+    setResults([]);
+    setSessionId(null);
 
     const formData = new FormData();
     formData.append("missing_image", missingImage);
@@ -45,7 +64,7 @@ export default function Home() {
       }
 
       const data = await response.json();
-      setResults(data.detections);
+      setSessionId(data.session_id);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -55,18 +74,18 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-white text-black font-sans flex flex-col items-center py-10 px-4 md:px-20">
-      <div className="w-full max-w-5xl space-y-8">
+      <div className="w-full max-w-6xl space-y-8">
         
         {/* Header */}
         <header className="flex flex-col gap-2 border-b-2 border-black pb-6">
-          <h1 className="text-4xl font-extrabold tracking-tight">Surveillance AI</h1>
-          <p className="text-lg text-gray-600">Cross-camera target acquisition utilizing optimized OpenCV heuristics.</p>
+          <h1 className="text-4xl font-extrabold tracking-tight">Surveillance Command Center</h1>
+          <p className="text-lg text-gray-600">YOLOv8 Accelerated Person Detection + Real-Time Video Overlays.</p>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           
           {/* Inputs */}
-          <section className="flex flex-col gap-6 bg-gray-50 border border-gray-200 p-6 rounded-2xl shadow-sm">
+          <section className="flex flex-col gap-6 bg-gray-50 border border-gray-200 p-6 rounded-2xl shadow-sm md:col-span-1 h-fit">
             <h2 className="text-2xl font-bold">Input Feeds</h2>
             
             <div className="flex flex-col gap-2">
@@ -101,12 +120,12 @@ export default function Home() {
 
             <button
               onClick={handleRunAnalysis}
-              disabled={loading}
+              disabled={loading || !!sessionId}
               className={`mt-4 py-3 px-6 rounded-full font-bold text-white transition-all shadow-md active:scale-95 ${
-                loading ? "bg-gray-400 cursor-not-allowed" : "bg-black hover:bg-gray-800"
+                loading || sessionId ? "bg-gray-400 cursor-not-allowed" : "bg-black hover:bg-gray-800"
               }`}
             >
-              {loading ? "Processing..." : "Initiate System Search"}
+              {loading ? "Starting Stream..." : sessionId ? "Stream Active" : "Initiate Live Analysis"}
             </button>
 
             {error && (
@@ -117,53 +136,103 @@ export default function Home() {
           </section>
 
           {/* Outputs */}
-          <section className="flex flex-col gap-6">
-            <h2 className="text-2xl font-bold">Analysis Results</h2>
+          <section className="flex flex-col gap-6 md:col-span-2">
+            
+            {/* Live Streams */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-2">
+                <h3 className="font-bold text-lg">CAM-1 Stream (2x Speed)</h3>
+                <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden border-4 border-gray-900 shadow-xl flex items-center justify-center">
+                  {sessionId ? (
+                    <img src={`http://localhost:8001/api/stream/${sessionId}/CAM-1`} alt="CAM-1 Live Feed" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-gray-500 font-medium">Awaiting Connection...</span>
+                  )}
+                </div>
+              </div>
 
-            {loading ? (
-              <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 h-64">
-                <div className="w-8 h-8 border-4 border-black border-t-transparent rounded-full animate-spin"></div>
-                <p className="mt-4 font-medium text-gray-500">Executing sequential frame scanning...</p>
-                <p className="text-xs text-gray-400">This may take several minutes depending on video size.</p>
+              <div className="flex flex-col gap-2">
+                <h3 className="font-bold text-lg">CAM-2 Stream (2x Speed)</h3>
+                <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden border-4 border-gray-900 shadow-xl flex items-center justify-center">
+                  {sessionId ? (
+                    <img src={`http://localhost:8001/api/stream/${sessionId}/CAM-2`} alt="CAM-2 Live Feed" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-gray-500 font-medium">Awaiting Connection...</span>
+                  )}
+                </div>
               </div>
-            ) : results ? (
-              <div className="flex flex-col gap-4">
-                {results.length === 0 ? (
-                  <div className="p-6 bg-gray-100 rounded-2xl text-center font-medium">
-                    No matching traces found for the target in the provided feeds.
-                  </div>
-                ) : (
-                  <div className="overflow-hidden border border-gray-200 rounded-2xl">
-                    <table className="w-full text-left bg-white">
-                      <thead className="bg-gray-100 uppercase text-xs tracking-wider border-b border-gray-200 font-bold">
-                        <tr>
-                          <th className="px-6 py-4">Camera</th>
-                          <th className="px-6 py-4">Timestamp</th>
-                          <th className="px-6 py-4 text-right">Confidence Match</th>
+            </div>
+
+            <div className="h-px bg-gray-200 w-full my-2"></div>
+
+            <h2 className="text-2xl font-bold flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                Live Alert Console 
+                {sessionId && <span className="inline-block w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>}
+              </div>
+              {results.length > 0 && (
+                <button 
+                  onClick={() => {
+                    const blob = new Blob([
+                      "Surveillance AI Evidence Report\n",
+                      "===========================\n\n",
+                      ...results.map(r => `[${r.timestamp}] ${r.camera}: Match Confidence ${(r.score * 100).toFixed(1)}%\n`)
+                    ], { type: "text/plain" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `evidence_report_${sessionId?.slice(0,8)}.txt`;
+                    a.click();
+                  }}
+                  className="text-sm bg-black text-white px-4 py-2 rounded-full hover:bg-gray-800 transition-all font-bold"
+                >
+                  Export Evidence
+                </button>
+              )}
+            </h2>
+
+            <div className="flex flex-col gap-4">
+              {results.length === 0 ? (
+                <div className="p-6 bg-gray-100 rounded-2xl text-center font-medium border border-gray-200 text-gray-500">
+                  {sessionId ? "Scanning for targets matching reference footprint..." : "System dormant."}
+                </div>
+              ) : (
+                <div className="overflow-hidden border border-gray-200 rounded-2xl shadow-sm">
+                  <table className="w-full text-left bg-white">
+                    <thead className="bg-gray-50 uppercase text-xs tracking-wider border-b border-gray-200 font-bold">
+                      <tr>
+                        <th className="px-6 py-4">Camera</th>
+                        <th className="px-6 py-4">Timestamp</th>
+                        <th className="px-6 py-4 text-right">Confidence Match</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {results.map((res, i) => (
+                        <tr key={i} className="hover:bg-blue-50/30 transition-colors animate-in fade-in slide-in-from-top-2">
+                          <td className="px-6 py-4 font-semibold text-red-600">{res.camera}</td>
+                          <td className="px-6 py-4 text-gray-600 font-mono">{res.timestamp}</td>
+                          <td className="px-6 py-4 text-right font-bold text-green-700">{(res.score * 100).toFixed(1)}%</td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {results.map((res, i) => (
-                          <tr key={i} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-6 py-4 font-semibold">{res.camera}</td>
-                            <td className="px-6 py-4 text-gray-600 font-mono">{res.timestamp}</td>
-                            <td className="px-6 py-4 text-right font-medium">{(res.score * 100).toFixed(1)}%</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex-1 border-2 border-dashed border-gray-300 flex items-center justify-center rounded-2xl bg-gray-50 text-gray-500 min-h-[250px]">
-                Awaiting feeds...
-              </div>
-            )}
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </section>
 
         </div>
       </div>
+      <footer className="mt-20 text-gray-400 text-xs flex items-center gap-4">
+        <div className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-green-500"></span>
+          DeepFace Engine Active
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-green-500"></span>
+          YOLOv8 Core Linked
+        </div>
+      </footer>
     </div>
   );
 }
