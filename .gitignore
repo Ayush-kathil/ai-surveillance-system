@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.next/
+node_modules/
+_archive/
+output/logs/
+output/snapshots/
+*.log

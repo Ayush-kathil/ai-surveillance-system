@@ -104,7 +104,7 @@ export default function Home() {
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-2 border-black pb-6">
           <div className="flex flex-col gap-2">
             <h1 className="text-4xl font-extrabold tracking-tight">Surveillance Command Center</h1>
-            <p className="text-lg text-gray-600">YOLOv8 Accelerated Person Detection + Real-Time Video Overlays.</p>
+            <p className="text-lg text-gray-600">YOLOv12 person detection with FaceNet-based missing person matching.</p>
           </div>
           
           <div className={`flex items-center gap-3 px-4 py-2 rounded-full border-2 font-bold transition-all ${
@@ -279,11 +279,11 @@ export default function Home() {
       <footer className="mt-20 text-gray-400 text-xs flex items-center gap-4">
         <div className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-full bg-green-500"></span>
-          DeepFace Engine Active
+          FaceNet Engine Active
         </div>
         <div className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-full bg-green-500"></span>
-          YOLOv8 Core Linked
+          YOLOv12 Core Linked
         </div>
       </footer>
     </div>

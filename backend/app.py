@@ -3,18 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import shutil
 import tempfile
-from engine import load_encoding_from_image, RECOGNITION_MODEL, DETECTOR_BACKEND
+from engine import load_encoding_from_image, warm_up_models
 from contextlib import asynccontextmanager
-from deepface import DeepFace
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Pre-load models
-    print("Pre-loading AI Models (YOLOv8, ArcFace)...")
+    print("Pre-loading AI Models (YOLOv12, FaceNet)...")
     try:
-        # YOLO is loaded via engine.py module import
-        # DeepFace models can be pre-built
-        DeepFace.build_model(RECOGNITION_MODEL)
+        warm_up_models()
         print("AI Models loaded successfully.")
     except Exception as e:
         print(f"Model pre-loading warning: {e}")
