@@ -1,5 +1,7 @@
 param(
-    [switch]$WhatIf
+    [switch]$WhatIf,
+    [switch]$SkipLegacyArchive,
+    [switch]$PruneOutputs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -100,7 +102,9 @@ New-Item -ItemType Directory -Force -Path $archiveRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $legacyRoot | Out-Null
 
 foreach ($legacy in $legacyFolders) {
-    Archive-LegacyFolder -Source (Join-Path $root $legacy) -Destination (Join-Path $legacyRoot $legacy)
+    if (-not $SkipLegacyArchive) {
+        Archive-LegacyFolder -Source (Join-Path $root $legacy) -Destination (Join-Path $legacyRoot $legacy)
+    }
 }
 
 $searchRoots = @(
@@ -125,7 +129,9 @@ $generatedFiles = @(
 )
 
 foreach ($generated in $generatedFiles) {
-    if (Test-Path -LiteralPath $generated) {
+    if ((Test-Path -LiteralPath $generated) -and $PruneOutputs) {
+        Remove-PathSafe -Path $generated
+    } elseif (Test-Path -LiteralPath $generated) {
         Write-Host "Kept generated output: $generated"
     }
 }
@@ -133,5 +139,14 @@ foreach ($generated in $generatedFiles) {
 Write-Host ""
 Write-Host "Cleanup complete."
 Write-Host "Active project: missing_person_project"
-Write-Host "Archived legacy folders: _archive\legacy\temp_repo and _archive\legacy\temp_face_repo"
-Write-Host "Removed caches: __pycache__, .next, node_modules, .pytest_cache, .mypy_cache, .ruff_cache"
+if ($SkipLegacyArchive) {
+    Write-Host "Legacy archive step: skipped"
+} else {
+    Write-Host "Archived legacy folders: _archive\legacy\temp_repo and _archive\legacy\temp_face_repo"
+}
+if ($PruneOutputs) {
+    Write-Host "Generated outputs were pruned: output\snapshots and output\logs"
+} else {
+    Write-Host "Generated outputs were preserved"
+}
+Write-Host "Removed caches: __pycache__, .next, .pytest_cache, .mypy_cache, .ruff_cache"

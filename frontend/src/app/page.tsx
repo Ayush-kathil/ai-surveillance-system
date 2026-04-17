@@ -39,6 +39,11 @@ function formatTime(value?: string) {
   return value;
 }
 
+function truncateSession(value: string | null) {
+  if (!value) return "Idle";
+  return `${value.slice(0, 8)}...`;
+}
+
 export default function Home() {
   const [missingImage, setMissingImage] = useState<File | null>(null);
   const [cam1, setCam1] = useState<File | null>(null);
@@ -48,8 +53,11 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [resetInfo, setResetInfo] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
   const [status, setStatus] = useState<SystemStatus>("booting");
   const [lastChecked, setLastChecked] = useState<string>("");
+  const [uploadKey, setUploadKey] = useState(0);
 
   const readyToRun = useMemo(
     () => Boolean(missingImage && cam1 && cam2 && !loading),
@@ -120,6 +128,41 @@ export default function Home() {
     setAlerts([]);
     setError(null);
     setBackendError(null);
+    setResetInfo(null);
+  };
+
+  const handleResetPlatform = async () => {
+    setResetting(true);
+    setError(null);
+    setResetInfo(null);
+
+    try {
+      const response = await fetchWithTimeout(`${BACKEND_URL}/api/system/reset-workspace`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ session_id: sessionId, prune_outputs: true }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || "Reset operation failed.");
+      }
+
+      resetSession();
+      setMissingImage(null);
+      setCam1(null);
+      setCam2(null);
+      setUploadKey((value) => value + 1);
+      setResetInfo("Platform reset completed. Temporary files were cleaned and session state was cleared.");
+      setStatus("online");
+    } catch (resetError) {
+      setStatus("offline");
+      setError(resetError instanceof Error ? resetError.message : "Failed to reset platform.");
+    } finally {
+      setResetting(false);
+    }
   };
 
   const handleRunAnalysis = async () => {
@@ -185,115 +228,121 @@ export default function Home() {
   const streamUrl = (camera: "CAM-1" | "CAM-2") => `${BACKEND_URL}/api/stream/${sessionId}/${camera}`;
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_28%),linear-gradient(180deg,#111111_0%,#0a0a0a_55%,#050505_100%)] text-white">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
-        <header className="border-b border-white/15 pb-6">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.35em] text-white/70">
-                Missing Person Search Platform
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,#f8fafc_0%,#eef2f7_46%,#e5ebf3_100%)] text-slate-900">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1200px] flex-col px-4 py-6 sm:px-6 lg:px-8">
+        <header className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl space-y-3">
+              <div className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-600">
+                Missing Person Platform
               </div>
-              <div className="space-y-3">
-                <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
-                  AI Surveillance Command Center
-                </h1>
-                <p className="max-w-2xl text-sm leading-6 text-white/70 sm:text-base">
-                  Black and white operator dashboard for live missing-person analysis.
-                  Upload a reference photo and camera feeds, then watch person-only detections,
-                  FaceNet matching, and evidence export from one control surface.
-                </p>
-              </div>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+                Surveillance Operations Console
+              </h1>
+              <p className="text-sm leading-6 text-slate-600 sm:text-base">
+                Professional control panel for AI-powered missing-person detection with live feeds,
+                alert intelligence, and evidence management.
+              </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3 lg:w-[36rem]">
-              <StatusCard label="Backend" value={status === "online" ? "Online" : status === "offline" ? "Offline" : "Booting"} tone={status === "online" ? "good" : status === "offline" ? "bad" : "neutral"} />
-              <StatusCard label="Session" value={sessionId ? sessionId.slice(0, 8) : "Idle"} tone={sessionId ? "good" : "neutral"} />
+            <div className="grid w-full gap-3 sm:grid-cols-3 lg:max-w-[34rem]">
+              <StatusCard
+                label="Backend"
+                value={status === "online" ? "Online" : status === "offline" ? "Offline" : "Booting"}
+                tone={status === "online" ? "good" : status === "offline" ? "bad" : "neutral"}
+              />
+              <StatusCard label="Session" value={truncateSession(sessionId)} tone={sessionId ? "good" : "neutral"} />
               <StatusCard label="Last check" value={lastChecked || "--:--:--"} tone="neutral" />
             </div>
           </div>
         </header>
 
-        <section className="mt-8 grid gap-6 xl:grid-cols-[420px_1fr]">
+        <section className="mt-6 grid gap-6 xl:grid-cols-[390px_1fr]">
           <aside className="space-y-6">
-            <Panel title="Mission Inputs" subtitle="Everything the operator needs to start a run.">
+            <Panel title="Mission Inputs" subtitle="Upload files and start or reset your operation.">
               <UploadField
+                key={`missing-${uploadKey}`}
                 label="Missing person image"
-                hint="Clear frontal face image for embedding extraction."
+                hint="Use a clear, frontal face photo."
                 accept="image/*"
+                fileName={missingImage?.name}
                 onChange={(event) => setMissingImage(event.target.files?.[0] ?? null)}
               />
               <UploadField
+                key={`cam1-${uploadKey}`}
                 label="Camera feed 1"
-                hint="Video file or recorded stream for CAM-1."
+                hint="Video stream capture for CAM-1."
                 accept="video/*"
+                fileName={cam1?.name}
                 onChange={(event) => setCam1(event.target.files?.[0] ?? null)}
               />
               <UploadField
+                key={`cam2-${uploadKey}`}
                 label="Camera feed 2"
-                hint="Video file or recorded stream for CAM-2."
+                hint="Video stream capture for CAM-2."
                 accept="video/*"
+                fileName={cam2?.name}
                 onChange={(event) => setCam2(event.target.files?.[0] ?? null)}
               />
 
-              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              <div className="mt-2 grid gap-3">
                 <button
                   type="button"
                   onClick={handleRunAnalysis}
                   disabled={!readyToRun}
-                  className="rounded-2xl border border-white bg-white px-4 py-3 text-sm font-bold text-black transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:border-white/15 disabled:bg-white/10 disabled:text-white/40"
+                  className="rounded-2xl border border-slate-900 bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500"
                 >
                   {loading ? "Launching analysis..." : sessionId ? "Analysis running" : "Start analysis"}
                 </button>
-                <button
-                  type="button"
-                  onClick={resetSession}
-                  className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
-                >
-                  Reset session
-                </button>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={resetSession}
+                    className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                  >
+                    Reset session
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetPlatform}
+                    disabled={resetting}
+                    className="rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:text-slate-400"
+                  >
+                    {resetting ? "Resetting platform..." : "Reset platform"}
+                  </button>
+                </div>
               </div>
 
-              {error ? (
-                <div className="mt-4 rounded-2xl border border-white/15 bg-white/5 p-4 text-sm text-white/80">
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                Ready when all three files are loaded.
+              </div>
+
+              {error && (
+                <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
                   {error}
-                </div>
-              ) : (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4 text-sm text-white/60">
-                  Ready when all three files are loaded.
                 </div>
               )}
 
               {backendError && (
-                <div className="mt-3 rounded-2xl border border-white/15 bg-white/5 p-4 text-sm text-white/80">
+                <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                   {backendError}
+                </div>
+              )}
+
+              {resetInfo && (
+                <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+                  {resetInfo}
                 </div>
               )}
             </Panel>
 
-            <Panel title="Operator Workflow" subtitle="Use the system in three steps.">
-              <ol className="space-y-3 text-sm text-white/75">
-                <li className="flex gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <span className="font-bold text-white">01</span>
-                  <span>Load the reference image for the missing person.</span>
-                </li>
-                <li className="flex gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <span className="font-bold text-white">02</span>
-                  <span>Upload both camera feeds to create the live search session.</span>
-                </li>
-                <li className="flex gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <span className="font-bold text-white">03</span>
-                  <span>Watch alerts, open the streams, and export the evidence report.</span>
-                </li>
-              </ol>
-            </Panel>
-
-            <Panel title="System Intelligence" subtitle="Tuning and model details.">
-              <div className="grid gap-3 text-sm text-white/75">
+            <Panel title="System Intelligence" subtitle="Current model and runtime profile.">
+              <div className="grid gap-3 text-sm text-slate-700">
                 <InfoRow label="Detector" value="YOLOv12-nano / person-only" />
-                <InfoRow label="Embedding model" value="FaceNet512" />
-                <InfoRow label="Match threshold" value="0.85 similarity" />
-                <InfoRow label="Acceleration" value="CUDA / TensorRT / OpenVINO-ready" />
-                <InfoRow label="Evidence" value="Snapshots + timestamps" />
+                <InfoRow label="Embedding" value="FaceNet512" />
+                <InfoRow label="Similarity threshold" value="0.85" />
+                <InfoRow label="Acceleration" value="CUDA, TensorRT, OpenVINO-ready" />
+                <InfoRow label="Outputs" value="Alerts, snapshots, export report" />
               </div>
             </Panel>
           </aside>
@@ -301,12 +350,8 @@ export default function Home() {
           <div className="space-y-6">
             <Panel
               title="Live Surveillance Feeds"
-              subtitle="Video streams are served directly from the backend session."
-              action={
-                <div className="text-xs uppercase tracking-[0.3em] text-white/45">
-                  {sessionId ? `Session ${sessionId.slice(0, 8)}` : "Waiting for session"}
-                </div>
-              }
+              subtitle="Backend MJPEG streams for active session cameras."
+              action={<div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{truncateSession(sessionId)}</div>}
             >
               <div className="grid gap-4 lg:grid-cols-2">
                 <StreamCard title="CAM-1 Live Feed" sessionId={sessionId} streamUrl={streamUrl("CAM-1")} backendUrl={BACKEND_URL} />
@@ -316,44 +361,42 @@ export default function Home() {
 
             <Panel
               title="Match Alerts"
-              subtitle="High-confidence matches are appended here in real time."
+              subtitle="High-confidence matches are tracked in real time."
               action={
                 <button
                   type="button"
                   onClick={handleExportEvidence}
                   disabled={alerts.length === 0}
-                  className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs font-bold uppercase tracking-[0.2em] text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:text-white/30"
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
                 >
                   Export evidence
                 </button>
               }
             >
               {alerts.length === 0 ? (
-                <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-8 text-center text-sm text-white/55">
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-600">
                   {sessionId
-                    ? "Scanning for person candidates and waiting for a threshold match."
-                    : "No active session yet. Start analysis to populate alerts."}
+                    ? "Analyzing frames continuously and waiting for match events."
+                    : "No active session. Start analysis to view alerts."}
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-3xl border border-white/10">
-                  <table className="min-w-full divide-y divide-white/10 text-left text-sm">
-                    <thead className="bg-white/5 text-white/60">
+                <div className="overflow-hidden rounded-2xl border border-slate-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                    <thead className="bg-slate-100 text-slate-600">
                       <tr>
-                        <th className="px-5 py-4 font-medium">Camera</th>
-                        <th className="px-5 py-4 font-medium">Timestamp</th>
-                        <th className="px-5 py-4 font-medium">Video time</th>
-                        <th className="px-5 py-4 font-medium text-right">Score</th>
+                        <th className="px-5 py-3 font-semibold">Camera</th>
+                        <th className="px-5 py-3 font-semibold">Timestamp</th>
+                        <th className="px-5 py-3 font-semibold">Video time</th>
+                        <th className="px-5 py-3 text-right font-semibold">Score</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/10 bg-black/20">
+                    <tbody className="divide-y divide-slate-200 bg-white">
                       {alerts.map((alert, index) => (
-                        <tr key={`${alert.timestamp}-${index}`} className="transition hover:bg-white/5">
-                          <td className="px-5 py-4 font-semibold text-white">{alert.camera}</td>
-                          <td className="px-5 py-4 text-white/65">{alert.timestamp}</td>
-                          <td className="px-5 py-4 text-white/65">{formatTime(alert.video_timestamp)}</td>
-                          <td className="px-5 py-4 text-right font-bold text-white">
-                            {formatPercent(alert.score)}
-                          </td>
+                        <tr key={`${alert.timestamp}-${index}`} className="transition hover:bg-slate-50">
+                          <td className="px-5 py-3 font-semibold text-slate-800">{alert.camera}</td>
+                          <td className="px-5 py-3 text-slate-600">{alert.timestamp}</td>
+                          <td className="px-5 py-3 text-slate-600">{formatTime(alert.video_timestamp)}</td>
+                          <td className="px-5 py-3 text-right font-semibold text-slate-800">{formatPercent(alert.score)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -380,11 +423,11 @@ function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
+    <section className="rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-[0_14px_34px_rgba(15,23,42,0.07)] backdrop-blur-sm">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold tracking-tight text-white">{title}</h2>
-          <p className="mt-1 text-sm text-white/55">{subtitle}</p>
+          <h2 className="text-lg font-bold tracking-tight text-slate-900">{title}</h2>
+          <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
         </div>
         {action}
       </div>
@@ -403,13 +446,13 @@ function StatusCard({
   tone: "good" | "bad" | "neutral";
 }) {
   const toneClasses = {
-    good: "border-white bg-white text-black",
-    bad: "border-white/20 bg-black text-white",
-    neutral: "border-white/10 bg-white/5 text-white",
+    good: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    bad: "border-rose-200 bg-rose-50 text-rose-700",
+    neutral: "border-slate-200 bg-slate-100 text-slate-700",
   }[tone];
 
   return (
-    <div className={`rounded-3xl border p-4 ${toneClasses}`}>
+    <div className={`rounded-2xl border p-4 ${toneClasses}`}>
       <p className="text-[11px] uppercase tracking-[0.3em] text-current/55">{label}</p>
       <p className="mt-2 text-sm font-bold">{value}</p>
     </div>
@@ -418,9 +461,9 @@ function StatusCard({
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-      <span className="text-white/55">{label}</span>
-      <span className="font-semibold text-white">{value}</span>
+    <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <span className="text-slate-500">{label}</span>
+      <span className="font-semibold text-slate-800">{value}</span>
     </div>
   );
 }
@@ -429,21 +472,23 @@ function UploadField({
   label,
   hint,
   accept,
+  fileName,
   onChange,
 }: {
   label: string;
   hint: string;
   accept: string;
+  fileName?: string;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
-    <label className="block rounded-3xl border border-dashed border-white/15 bg-black/30 p-4 transition hover:border-white/30 hover:bg-black/40">
+    <label className="block rounded-2xl border border-dashed border-slate-300 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-bold text-white">{label}</p>
-          <p className="mt-1 text-xs leading-5 text-white/50">{hint}</p>
+          <p className="text-sm font-semibold text-slate-800">{label}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">{hint}</p>
         </div>
-        <span className="rounded-full border border-white/15 px-3 py-1 text-[10px] uppercase tracking-[0.25em] text-white/50">
+        <span className="rounded-full border border-slate-300 px-3 py-1 text-[10px] uppercase tracking-[0.25em] text-slate-500">
           Upload
         </span>
       </div>
@@ -451,8 +496,9 @@ function UploadField({
         type="file"
         accept={accept}
         onChange={onChange}
-        className="block w-full text-sm text-white file:mr-4 file:rounded-full file:border-0 file:bg-white file:px-4 file:py-2 file:text-sm file:font-bold file:text-black hover:file:bg-white/90"
+        className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-full file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-slate-700"
       />
+      <p className="mt-3 truncate text-xs text-slate-500">{fileName ?? "No file selected"}</p>
     </label>
   );
 }
@@ -469,20 +515,20 @@ function StreamCard({
   backendUrl: string;
 }) {
   return (
-    <div className="space-y-3 rounded-3xl border border-white/10 bg-black/30 p-3">
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
       <div className="flex items-center justify-between px-1">
-        <h3 className="text-sm font-bold text-white">{title}</h3>
-        <span className="text-[10px] uppercase tracking-[0.25em] text-white/45">{sessionId ? "Streaming" : "Idle"}</span>
+        <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+        <span className="text-[10px] uppercase tracking-[0.25em] text-slate-400">{sessionId ? "Streaming" : "Idle"}</span>
       </div>
-      <div className="relative aspect-video overflow-hidden rounded-[1.5rem] border border-white/10 bg-black">
+      <div className="relative aspect-video overflow-hidden rounded-xl border border-slate-200 bg-slate-900">
         {sessionId ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={streamUrl} alt={title} className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-center text-white/55">
-            <div className="h-12 w-12 rounded-full border border-white/20 bg-white/5" />
+          <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-center text-slate-300">
+            <div className="h-12 w-12 rounded-full border border-slate-500 bg-slate-700" />
             <div>
-              <p className="text-sm font-semibold text-white/75">Backend online?</p>
+              <p className="text-sm font-semibold text-slate-200">Backend online?</p>
               <p className="text-xs">{backendUrl}</p>
             </div>
           </div>

@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import shutil
 import tempfile
+import subprocess
+from pathlib import Path
+from pydantic import BaseModel
 from engine import load_encoding_from_image, warm_up_models
 from contextlib import asynccontextmanager
 
@@ -95,3 +98,57 @@ def get_alerts(session_id: str):
 @app.get("/health")
 def read_root():
     return {"status": "Online"}
+
+
+class ResetRequest(BaseModel):
+    session_id: str | None = None
+    prune_outputs: bool = True
+
+
+@app.post("/api/system/reset-workspace")
+async def reset_workspace(payload: ResetRequest):
+    if payload.session_id:
+        app.state.sessions.pop(payload.session_id, None)
+    else:
+        app.state.sessions.clear()
+
+    workspace_root = Path(__file__).resolve().parents[1]
+    cleanup_script = workspace_root / "scripts" / "cleanup_workspace.ps1"
+    if not cleanup_script.exists():
+        raise HTTPException(status_code=500, detail="Cleanup script not found")
+
+    command = [
+        "powershell",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(cleanup_script),
+        "-SkipLegacyArchive",
+    ]
+    if payload.prune_outputs:
+        command.append("-PruneOutputs")
+
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            command,
+            cwd=str(workspace_root),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Cleanup timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {e}")
+
+    if result.returncode != 0:
+        error_text = (result.stderr or result.stdout or "Cleanup script exited with errors").strip()
+        raise HTTPException(status_code=500, detail=error_text)
+
+    return {
+        "status": "success",
+        "message": "Workspace reset completed.",
+        "output": (result.stdout or "").strip(),
+    }
