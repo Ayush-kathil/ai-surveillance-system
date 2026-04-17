@@ -1,75 +1,136 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import type { ChangeEvent, ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-type Detection = {
+type AlertItem = {
   camera: string;
   timestamp: string;
+  video_timestamp?: string;
   score: number;
+  euclidean_distance?: number;
+  snapshot?: string;
 };
+
+type SystemStatus = "booting" | "online" | "offline";
+
+const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001").replace(/\/+$/, "");
+const API_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(url: string, options?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value * 1000) / 10}%`;
+}
+
+function formatTime(value?: string) {
+  if (!value) return "--:--:--";
+  return value;
+}
 
 export default function Home() {
   const [missingImage, setMissingImage] = useState<File | null>(null);
   const [cam1, setCam1] = useState<File | null>(null);
   const [cam2, setCam2] = useState<File | null>(null);
-
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [results, setResults] = useState<Detection[]>([]);
-  const [backendStatus, setBackendStatus] = useState<"connecting" | "online" | "offline">("connecting");
+  const [backendError, setBackendError] = useState<string | null>(null);
+  const [status, setStatus] = useState<SystemStatus>("booting");
+  const [lastChecked, setLastChecked] = useState<string>("");
 
-  // Check backend health
+  const readyToRun = useMemo(
+    () => Boolean(missingImage && cam1 && cam2 && !loading),
+    [missingImage, cam1, cam2, loading],
+  );
+
   useEffect(() => {
+    let mounted = true;
+
     const checkHealth = async () => {
       try {
-        const res = await fetch("http://localhost:8001/health");
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === "Online") {
-            setBackendStatus("online");
-          } else {
-            setBackendStatus("offline");
-          }
+        const response = await fetchWithTimeout(`${BACKEND_URL}/health`);
+        if (!mounted) return;
+        if (response.ok) {
+          const data = await response.json();
+          setStatus(data.status === "Online" ? "online" : "offline");
+          setBackendError(null);
         } else {
-          setBackendStatus("offline");
+          setStatus("offline");
+          setBackendError("Backend health check failed. Confirm the API is running on port 8001.");
         }
       } catch {
-        setBackendStatus("offline");
+        if (mounted) {
+          setStatus("offline");
+          setBackendError("Cannot reach backend. Start the backend service and retry.");
+        }
+      } finally {
+        if (mounted) setLastChecked(new Date().toLocaleTimeString());
       }
     };
+
     checkHealth();
     const interval = setInterval(checkHealth, 5000);
-    return () => clearInterval(interval);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
-  // Poll alerts rapidly when session is active
   useEffect(() => {
     if (!sessionId) return;
-    const interval = setInterval(async () => {
+
+    const pollAlerts = async () => {
       try {
-        const res = await fetch(`http://localhost:8001/api/alerts/${sessionId}`);
-        if (res.ok) {
-          const data = await res.json();
-          setResults(data.alerts);
+        const response = await fetchWithTimeout(`${BACKEND_URL}/api/alerts/${sessionId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
+          setBackendError(null);
+          setStatus("online");
+        } else {
+          setBackendError("Alert endpoint returned an error response.");
         }
-      } catch (err) {
-        console.error("Failed to poll alerts", err);
+      } catch {
+        setStatus("offline");
+        setBackendError("Live alert polling lost connection to backend.");
       }
-    }, 1000);
+    };
+
+    pollAlerts();
+    const interval = setInterval(pollAlerts, 1000);
     return () => clearInterval(interval);
   }, [sessionId]);
 
+  const resetSession = () => {
+    setSessionId(null);
+    setAlerts([]);
+    setError(null);
+    setBackendError(null);
+  };
+
   const handleRunAnalysis = async () => {
     if (!missingImage || !cam1 || !cam2) {
-      setError("Please provide all required files.");
+      setError("Upload the missing person image plus both camera feeds before starting.");
       return;
     }
 
     setLoading(true);
     setError(null);
-    setResults([]);
-    setSessionId(null);
+    setAlerts([]);
 
     const formData = new FormData();
     formData.append("missing_image", missingImage);
@@ -77,215 +138,356 @@ export default function Home() {
     formData.append("cam2_video", cam2);
 
     try {
-      const response = await fetch("http://localhost:8001/api/analyze", {
+      const response = await fetch(`${BACKEND_URL}/api/analyze`, {
         method: "POST",
         body: formData,
       });
 
       if (!response.ok) {
-        const d = await response.json();
-        throw new Error(d.detail || "Analysis failed on the server.");
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || "The backend could not start the analysis.");
       }
 
       const data = await response.json();
       setSessionId(data.session_id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+      setBackendError(null);
+      setStatus("online");
+    } catch (runError) {
+      setStatus("offline");
+      setError(runError instanceof Error ? runError.message : "Unexpected frontend error.");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleExportEvidence = () => {
+    const content = [
+      "AI Surveillance Evidence Report",
+      "================================",
+      `Session: ${sessionId ?? "N/A"}`,
+      `Generated: ${new Date().toLocaleString()}`,
+      "",
+      ...alerts.map(
+        (alert) =>
+          `[${alert.timestamp}] ${alert.camera} | video=${formatTime(alert.video_timestamp)} | score=${formatPercent(alert.score)} | euclidean=${alert.euclidean_distance?.toFixed(3) ?? "--"} | snapshot=${alert.snapshot ?? "--"}`,
+      ),
+    ].join("\n");
+
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `surveillance_evidence_${sessionId?.slice(0, 8) ?? "session"}.txt`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const streamUrl = (camera: "CAM-1" | "CAM-2") => `${BACKEND_URL}/api/stream/${sessionId}/${camera}`;
+
   return (
-    <div className="min-h-screen bg-white text-black font-sans flex flex-col items-center py-10 px-4 md:px-20">
-      <div className="w-full max-w-6xl space-y-8">
-        
-        {/* Header */}
-        <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b-2 border-black pb-6">
-          <div className="flex flex-col gap-2">
-            <h1 className="text-4xl font-extrabold tracking-tight">Surveillance Command Center</h1>
-            <p className="text-lg text-gray-600">YOLOv12 person detection with FaceNet-based missing person matching.</p>
-          </div>
-          
-          <div className={`flex items-center gap-3 px-4 py-2 rounded-full border-2 font-bold transition-all ${
-            backendStatus === "online" ? "border-green-500 text-green-700 bg-green-50" : 
-            backendStatus === "offline" ? "border-red-500 text-red-700 bg-red-50" : 
-            "border-gray-300 text-gray-500 bg-gray-50 animate-pulse"
-          }`}>
-            <span className={`w-3 h-3 rounded-full ${
-              backendStatus === "online" ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" : 
-              backendStatus === "offline" ? "bg-red-500" : 
-              "bg-gray-400"
-            }`}></span>
-            {backendStatus === "online" ? "ENGINE ONLINE" : 
-             backendStatus === "offline" ? "ENGINE OFFLINE" : 
-             "CONNECTING..."}
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_28%),linear-gradient(180deg,#111111_0%,#0a0a0a_55%,#050505_100%)] text-white">
+      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
+        <header className="border-b border-white/15 pb-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl space-y-4">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.35em] text-white/70">
+                Missing Person Search Platform
+              </div>
+              <div className="space-y-3">
+                <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
+                  AI Surveillance Command Center
+                </h1>
+                <p className="max-w-2xl text-sm leading-6 text-white/70 sm:text-base">
+                  Black and white operator dashboard for live missing-person analysis.
+                  Upload a reference photo and camera feeds, then watch person-only detections,
+                  FaceNet matching, and evidence export from one control surface.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 lg:w-[36rem]">
+              <StatusCard label="Backend" value={status === "online" ? "Online" : status === "offline" ? "Offline" : "Booting"} tone={status === "online" ? "good" : status === "offline" ? "bad" : "neutral"} />
+              <StatusCard label="Session" value={sessionId ? sessionId.slice(0, 8) : "Idle"} tone={sessionId ? "good" : "neutral"} />
+              <StatusCard label="Last check" value={lastChecked || "--:--:--"} tone="neutral" />
+            </div>
           </div>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          
-          {/* Inputs */}
-          <section className="flex flex-col gap-6 bg-gray-50 border border-gray-200 p-6 rounded-2xl shadow-sm md:col-span-1 h-fit">
-            <h2 className="text-2xl font-bold">Input Feeds</h2>
-            
-            <div className="flex flex-col gap-2">
-              <label className="font-semibold">Missing Person Reference Image</label>
-              <input 
-                type="file" 
+        <section className="mt-8 grid gap-6 xl:grid-cols-[420px_1fr]">
+          <aside className="space-y-6">
+            <Panel title="Mission Inputs" subtitle="Everything the operator needs to start a run.">
+              <UploadField
+                label="Missing person image"
+                hint="Clear frontal face image for embedding extraction."
                 accept="image/*"
-                onChange={(e) => setMissingImage(e.target.files?.[0] || null)}
-                className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-black file:text-white hover:file:bg-gray-800 cursor-pointer"
+                onChange={(event) => setMissingImage(event.target.files?.[0] ?? null)}
               />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label className="font-semibold">Camera Feed 1 (MP4)</label>
-              <input 
-                type="file" 
-                accept="video/mp4"
-                onChange={(e) => setCam1(e.target.files?.[0] || null)}
-                className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-black file:text-white hover:file:bg-gray-800 cursor-pointer"
+              <UploadField
+                label="Camera feed 1"
+                hint="Video file or recorded stream for CAM-1."
+                accept="video/*"
+                onChange={(event) => setCam1(event.target.files?.[0] ?? null)}
               />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label className="font-semibold">Camera Feed 2 (MP4)</label>
-              <input 
-                type="file" 
-                accept="video/mp4"
-                onChange={(e) => setCam2(e.target.files?.[0] || null)}
-                className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-black file:text-white hover:file:bg-gray-800 cursor-pointer"
+              <UploadField
+                label="Camera feed 2"
+                hint="Video file or recorded stream for CAM-2."
+                accept="video/*"
+                onChange={(event) => setCam2(event.target.files?.[0] ?? null)}
               />
-            </div>
 
-            <button
-              onClick={handleRunAnalysis}
-              disabled={loading || !!sessionId}
-              className={`mt-4 py-3 px-6 rounded-full font-bold text-white transition-all shadow-md active:scale-95 ${
-                loading || sessionId ? "bg-gray-400 cursor-not-allowed" : "bg-black hover:bg-gray-800"
-              }`}
-            >
-              {loading ? "Starting Stream..." : sessionId ? "Stream Active" : "Initiate Live Analysis"}
-            </button>
-
-            {error && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-xl border border-red-200 font-medium">
-                {error}
-              </div>
-            )}
-          </section>
-
-          {/* Outputs */}
-          <section className="flex flex-col gap-6 md:col-span-2">
-            
-            {/* Live Streams */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col gap-2">
-                <h3 className="font-bold text-lg">CAM-1 Stream (2x Speed)</h3>
-                <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden border-4 border-gray-900 shadow-xl flex items-center justify-center">
-                  {sessionId ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={`http://localhost:8001/api/stream/${sessionId}/CAM-1`} alt="CAM-1 Live Feed" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="flex flex-col items-center gap-2">
-                      <span className="text-gray-500 font-medium">
-                        {backendStatus === "online" ? "System Ready" : "Awaiting Backend..."}
-                      </span>
-                      {backendStatus === "online" && <span className="text-xs text-gray-600">Upload feeds to begin</span>}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <h3 className="font-bold text-lg">CAM-2 Stream (2x Speed)</h3>
-                <div className="w-full aspect-video bg-black rounded-2xl overflow-hidden border-4 border-gray-900 shadow-xl flex items-center justify-center">
-                  {sessionId ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={`http://localhost:8001/api/stream/${sessionId}/CAM-2`} alt="CAM-2 Live Feed" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="flex flex-col items-center gap-2">
-                      <span className="text-gray-500 font-medium">
-                        {backendStatus === "online" ? "System Ready" : "Awaiting Backend..."}
-                      </span>
-                      {backendStatus === "online" && <span className="text-xs text-gray-600">Upload feeds to begin</span>}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="h-px bg-gray-200 w-full my-2"></div>
-
-            <h2 className="text-2xl font-bold flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                Live Alert Console 
-                {sessionId && <span className="inline-block w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>}
-              </div>
-              {results.length > 0 && (
-                <button 
-                  onClick={() => {
-                    const blob = new Blob([
-                      "Surveillance AI Evidence Report\n",
-                      "===========================\n\n",
-                      ...results.map(r => `[${r.timestamp}] ${r.camera}: Match Confidence ${(r.score * 100).toFixed(1)}%\n`)
-                    ], { type: "text/plain" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `evidence_report_${sessionId?.slice(0,8)}.txt`;
-                    a.click();
-                  }}
-                  className="text-sm bg-black text-white px-4 py-2 rounded-full hover:bg-gray-800 transition-all font-bold"
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={handleRunAnalysis}
+                  disabled={!readyToRun}
+                  className="rounded-2xl border border-white bg-white px-4 py-3 text-sm font-bold text-black transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:border-white/15 disabled:bg-white/10 disabled:text-white/40"
                 >
-                  Export Evidence
+                  {loading ? "Launching analysis..." : sessionId ? "Analysis running" : "Start analysis"}
                 </button>
-              )}
-            </h2>
+                <button
+                  type="button"
+                  onClick={resetSession}
+                  className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10"
+                >
+                  Reset session
+                </button>
+              </div>
 
-            <div className="flex flex-col gap-4">
-              {results.length === 0 ? (
-                <div className="p-6 bg-gray-100 rounded-2xl text-center font-medium border border-gray-200 text-gray-500">
-                  {sessionId ? "Scanning for targets matching reference footprint..." : "System dormant."}
+              {error ? (
+                <div className="mt-4 rounded-2xl border border-white/15 bg-white/5 p-4 text-sm text-white/80">
+                  {error}
                 </div>
               ) : (
-                <div className="overflow-hidden border border-gray-200 rounded-2xl shadow-sm">
-                  <table className="w-full text-left bg-white">
-                    <thead className="bg-gray-50 uppercase text-xs tracking-wider border-b border-gray-200 font-bold">
+                <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4 text-sm text-white/60">
+                  Ready when all three files are loaded.
+                </div>
+              )}
+
+              {backendError && (
+                <div className="mt-3 rounded-2xl border border-white/15 bg-white/5 p-4 text-sm text-white/80">
+                  {backendError}
+                </div>
+              )}
+            </Panel>
+
+            <Panel title="Operator Workflow" subtitle="Use the system in three steps.">
+              <ol className="space-y-3 text-sm text-white/75">
+                <li className="flex gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <span className="font-bold text-white">01</span>
+                  <span>Load the reference image for the missing person.</span>
+                </li>
+                <li className="flex gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <span className="font-bold text-white">02</span>
+                  <span>Upload both camera feeds to create the live search session.</span>
+                </li>
+                <li className="flex gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <span className="font-bold text-white">03</span>
+                  <span>Watch alerts, open the streams, and export the evidence report.</span>
+                </li>
+              </ol>
+            </Panel>
+
+            <Panel title="System Intelligence" subtitle="Tuning and model details.">
+              <div className="grid gap-3 text-sm text-white/75">
+                <InfoRow label="Detector" value="YOLOv12-nano / person-only" />
+                <InfoRow label="Embedding model" value="FaceNet512" />
+                <InfoRow label="Match threshold" value="0.85 similarity" />
+                <InfoRow label="Acceleration" value="CUDA / TensorRT / OpenVINO-ready" />
+                <InfoRow label="Evidence" value="Snapshots + timestamps" />
+              </div>
+            </Panel>
+          </aside>
+
+          <div className="space-y-6">
+            <Panel
+              title="Live Surveillance Feeds"
+              subtitle="Video streams are served directly from the backend session."
+              action={
+                <div className="text-xs uppercase tracking-[0.3em] text-white/45">
+                  {sessionId ? `Session ${sessionId.slice(0, 8)}` : "Waiting for session"}
+                </div>
+              }
+            >
+              <div className="grid gap-4 lg:grid-cols-2">
+                <StreamCard title="CAM-1 Live Feed" sessionId={sessionId} streamUrl={streamUrl("CAM-1")} backendUrl={BACKEND_URL} />
+                <StreamCard title="CAM-2 Live Feed" sessionId={sessionId} streamUrl={streamUrl("CAM-2")} backendUrl={BACKEND_URL} />
+              </div>
+            </Panel>
+
+            <Panel
+              title="Match Alerts"
+              subtitle="High-confidence matches are appended here in real time."
+              action={
+                <button
+                  type="button"
+                  onClick={handleExportEvidence}
+                  disabled={alerts.length === 0}
+                  className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs font-bold uppercase tracking-[0.2em] text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:text-white/30"
+                >
+                  Export evidence
+                </button>
+              }
+            >
+              {alerts.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-white/15 bg-white/[0.03] p-8 text-center text-sm text-white/55">
+                  {sessionId
+                    ? "Scanning for person candidates and waiting for a threshold match."
+                    : "No active session yet. Start analysis to populate alerts."}
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-3xl border border-white/10">
+                  <table className="min-w-full divide-y divide-white/10 text-left text-sm">
+                    <thead className="bg-white/5 text-white/60">
                       <tr>
-                        <th className="px-6 py-4">Camera</th>
-                        <th className="px-6 py-4">Timestamp</th>
-                        <th className="px-6 py-4 text-right">Confidence Match</th>
+                        <th className="px-5 py-4 font-medium">Camera</th>
+                        <th className="px-5 py-4 font-medium">Timestamp</th>
+                        <th className="px-5 py-4 font-medium">Video time</th>
+                        <th className="px-5 py-4 font-medium text-right">Score</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {results.map((res, i) => (
-                        <tr key={i} className="hover:bg-blue-50/30 transition-colors animate-in fade-in slide-in-from-top-2">
-                          <td className="px-6 py-4 font-semibold text-red-600">{res.camera}</td>
-                          <td className="px-6 py-4 text-gray-600 font-mono">{res.timestamp}</td>
-                          <td className="px-6 py-4 text-right font-bold text-green-700">{(res.score * 100).toFixed(1)}%</td>
+                    <tbody className="divide-y divide-white/10 bg-black/20">
+                      {alerts.map((alert, index) => (
+                        <tr key={`${alert.timestamp}-${index}`} className="transition hover:bg-white/5">
+                          <td className="px-5 py-4 font-semibold text-white">{alert.camera}</td>
+                          <td className="px-5 py-4 text-white/65">{alert.timestamp}</td>
+                          <td className="px-5 py-4 text-white/65">{formatTime(alert.video_timestamp)}</td>
+                          <td className="px-5 py-4 text-right font-bold text-white">
+                            {formatPercent(alert.score)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               )}
-            </div>
-          </section>
-
-        </div>
+            </Panel>
+          </div>
+        </section>
       </div>
-      <footer className="mt-20 text-gray-400 text-xs flex items-center gap-4">
-        <div className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-green-500"></span>
-          FaceNet Engine Active
+    </main>
+  );
+}
+
+function Panel({
+  title,
+  subtitle,
+  action,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold tracking-tight text-white">{title}</h2>
+          <p className="mt-1 text-sm text-white/55">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-green-500"></span>
-          YOLOv12 Core Linked
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function StatusCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "good" | "bad" | "neutral";
+}) {
+  const toneClasses = {
+    good: "border-white bg-white text-black",
+    bad: "border-white/20 bg-black text-white",
+    neutral: "border-white/10 bg-white/5 text-white",
+  }[tone];
+
+  return (
+    <div className={`rounded-3xl border p-4 ${toneClasses}`}>
+      <p className="text-[11px] uppercase tracking-[0.3em] text-current/55">{label}</p>
+      <p className="mt-2 text-sm font-bold">{value}</p>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+      <span className="text-white/55">{label}</span>
+      <span className="font-semibold text-white">{value}</span>
+    </div>
+  );
+}
+
+function UploadField({
+  label,
+  hint,
+  accept,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  accept: string;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <label className="block rounded-3xl border border-dashed border-white/15 bg-black/30 p-4 transition hover:border-white/30 hover:bg-black/40">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-white">{label}</p>
+          <p className="mt-1 text-xs leading-5 text-white/50">{hint}</p>
         </div>
-      </footer>
+        <span className="rounded-full border border-white/15 px-3 py-1 text-[10px] uppercase tracking-[0.25em] text-white/50">
+          Upload
+        </span>
+      </div>
+      <input
+        type="file"
+        accept={accept}
+        onChange={onChange}
+        className="block w-full text-sm text-white file:mr-4 file:rounded-full file:border-0 file:bg-white file:px-4 file:py-2 file:text-sm file:font-bold file:text-black hover:file:bg-white/90"
+      />
+    </label>
+  );
+}
+
+function StreamCard({
+  title,
+  sessionId,
+  streamUrl,
+  backendUrl,
+}: {
+  title: string;
+  sessionId: string | null;
+  streamUrl: string;
+  backendUrl: string;
+}) {
+  return (
+    <div className="space-y-3 rounded-3xl border border-white/10 bg-black/30 p-3">
+      <div className="flex items-center justify-between px-1">
+        <h3 className="text-sm font-bold text-white">{title}</h3>
+        <span className="text-[10px] uppercase tracking-[0.25em] text-white/45">{sessionId ? "Streaming" : "Idle"}</span>
+      </div>
+      <div className="relative aspect-video overflow-hidden rounded-[1.5rem] border border-white/10 bg-black">
+        {sessionId ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={streamUrl} alt={title} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-center text-white/55">
+            <div className="h-12 w-12 rounded-full border border-white/20 bg-white/5" />
+            <div>
+              <p className="text-sm font-semibold text-white/75">Backend online?</p>
+              <p className="text-xs">{backendUrl}</p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

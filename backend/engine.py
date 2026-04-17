@@ -30,7 +30,7 @@ import numpy as np
 from deepface import DeepFace
 from ultralytics import YOLO
 
-FACE_MODEL_NAME = os.getenv("FACE_MODEL_NAME", "Facenet")
+FACE_MODEL_NAME = os.getenv("FACE_MODEL_NAME", "Facenet512")
 FACE_DETECTOR_BACKEND = os.getenv("FACE_DETECTOR_BACKEND", "opencv")
 PERSON_CLASS_ID = 0
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.85"))
@@ -38,12 +38,9 @@ FACE_CONFIDENCE_THRESHOLD = float(os.getenv("FACE_CONFIDENCE_THRESHOLD", "0.60")
 YOLO_CONFIDENCE = float(os.getenv("YOLO_CONFIDENCE", "0.35"))
 YOLO_IMAGE_SIZE = int(os.getenv("YOLO_IMAGE_SIZE", "640"))
 MAX_PERSONS_PER_FRAME = int(os.getenv("MAX_PERSONS_PER_FRAME", "3"))
-INITIAL_FRAME_STRIDE = max(1, int(os.getenv("INITIAL_FRAME_STRIDE", "1")))
-MAX_FRAME_STRIDE = max(INITIAL_FRAME_STRIDE, int(os.getenv("MAX_FRAME_STRIDE", "4")))
-TARGET_PROCESSING_MS = float(os.getenv("TARGET_PROCESSING_MS", "50.0"))
 MAX_FRAME_WIDTH = int(os.getenv("MAX_FRAME_WIDTH", "960"))
 PERSON_CROP_PADDING = int(os.getenv("PERSON_CROP_PADDING", "24"))
-ALERT_COOLDOWN_SECONDS = int(os.getenv("ALERT_COOLDOWN_SECONDS", "5"))
+MATCH_RESET_FRAMES = max(1, int(os.getenv("MATCH_RESET_FRAMES", "4")))
 SNAPSHOT_DIR = Path(os.getenv("MATCH_SNAPSHOT_DIR", "output/snapshots"))
 YOLO_DEVICE = 0 if torch is not None and torch.cuda.is_available() else "cpu"
 YOLO_HALF = bool(torch is not None and torch.cuda.is_available())
@@ -228,8 +225,8 @@ def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndar
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_index = 0
-    frame_stride = INITIAL_FRAME_STRIDE
-    last_alert_seconds = -10.0
+    match_active = False
+    non_match_streak = 0
 
     try:
         while True:
@@ -238,14 +235,11 @@ def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndar
                 break
 
             frame_index += 1
-            if frame_index % frame_stride != 0:
-                continue
 
             if frame.shape[1] > MAX_FRAME_WIDTH:
                 scale = MAX_FRAME_WIDTH / frame.shape[1]
                 frame = cv2.resize(frame, (MAX_FRAME_WIDTH, int(frame.shape[0] * scale)))
 
-            process_started = time.perf_counter()
             detections = get_yolo_model().predict(
                 frame,
                 classes=[PERSON_CLASS_ID],
@@ -306,12 +300,14 @@ def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndar
                     2,
                 )
 
-            if best_match and best_match.similarity >= MATCH_THRESHOLD:
-                current_seconds = frame_index / fps
-                if current_seconds - last_alert_seconds >= ALERT_COOLDOWN_SECONDS:
-                    last_alert_seconds = current_seconds
+            is_match = bool(best_match and best_match.similarity >= MATCH_THRESHOLD)
+
+            if is_match and best_match is not None:
+                non_match_streak = 0
+                if not match_active:
+                    match_active = True
                     event_time = datetime.now()
-                    video_timestamp = str(timedelta(seconds=int(current_seconds)))
+                    video_timestamp = str(timedelta(seconds=int(frame_index / fps)))
                     _append_match_alert(
                         alerts_list,
                         camera_id=camera_id,
@@ -321,12 +317,10 @@ def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndar
                         video_timestamp=video_timestamp,
                         frame=frame,
                     )
-
-            elapsed_ms = (time.perf_counter() - process_started) * 1000.0
-            if elapsed_ms > TARGET_PROCESSING_MS and frame_stride < MAX_FRAME_STRIDE:
-                frame_stride += 1
-            elif elapsed_ms < (TARGET_PROCESSING_MS * 0.60) and frame_stride > 1:
-                frame_stride -= 1
+            else:
+                non_match_streak += 1
+                if non_match_streak >= MATCH_RESET_FRAMES:
+                    match_active = False
 
             ret, buffer = cv2.imencode(".jpg", frame)
             if not ret:
