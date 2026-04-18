@@ -29,28 +29,25 @@ export default function ReviewPage() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#ffffff_0%,#f5f5f5_42%,#ebebeb_100%)] text-black">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl items-center px-6 py-8 sm:px-10 lg:px-12">
+      <div className="mx-auto flex min-h-screen w-full max-w-6xl items-center px-6 py-8 sm:px-10 lg:px-12">
         <section className="w-full space-y-6 fade-in-up">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="space-y-3">
-              <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-black px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-white">
-                Step 3
-              </div>
-              <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
-                Review detection, streams, and exported evidence.
-              </h1>
-              <p className="max-w-3xl text-sm leading-7 text-black/65 sm:text-base">
-                This page stays focused on the live operation: backend status, progress, camera feeds, match alerts, and the exported report containing the detected snapshots.
-              </p>
+          <div className="text-center space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-black px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-white">
+              Step 3
             </div>
+            <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
+              Review detection, streams, and exported evidence.
+            </h1>
+            <p className="mx-auto max-w-3xl text-sm leading-7 text-black/65 sm:text-base">
+              This page shows the live operation in one centered view: progress, camera feeds, match alerts, and the exported report containing the detected snapshots.
+            </p>
             <div className="inline-flex items-center gap-3 rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-black shadow-[0_12px_30px_rgba(0,0,0,0.05)]">
               <span className={`h-3 w-3 rounded-full ${status === "online" ? "bg-emerald-500" : status === "offline" ? "bg-rose-500" : "bg-zinc-400"}`} />
               {status === "online" ? "Backend online" : status === "offline" ? "Backend offline" : "Checking backend"}
             </div>
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-            <div className="space-y-6">
+          <div className="space-y-6">
               <Panel title="Detection progress" subtitle="A simple monotone indicator that rises as the workflow advances.">
                 <div className="space-y-4 rounded-[1.5rem] border border-black/10 bg-black/[0.02] p-5">
                   <div className="flex items-end justify-between gap-4">
@@ -70,7 +67,7 @@ export default function ReviewPage() {
               </Panel>
 
               <Panel title="Source previews" subtitle="The selected photo and both camera files stay visible here.">
-                <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-1">
+                <div className="grid gap-4 md:grid-cols-3">
                   <MiniPreview title="Missing photo" src={missingPreview} fallback="Missing person photo" />
                   <MiniPreview title="CAM-1 preview" src={cam1Preview} fallback="CAM-1 video preview" video />
                   <MiniPreview title="CAM-2 preview" src={cam2Preview} fallback="CAM-2 video preview" video />
@@ -78,7 +75,7 @@ export default function ReviewPage() {
               </Panel>
 
               <Panel title="Actions" subtitle="Start, reset, export, or step back to adjust inputs.">
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-center">
                   <button
                     type="button"
                     onClick={handleRunAnalysis}
@@ -111,7 +108,7 @@ export default function ReviewPage() {
                     {resetting ? "Resetting platform..." : "Reset platform"}
                   </button>
                 </div>
-                <div className="mt-4 flex gap-3">
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-center">
                   <Link href="/videos" onClick={() => setStep(2)} className="rounded-full border border-black/15 bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-black/[0.03]">
                     Back to videos
                   </Link>
@@ -123,11 +120,9 @@ export default function ReviewPage() {
                 {backendError && <Notice tone="warning" message={backendError} />}
                 {resetInfo && <Notice tone="success" message={resetInfo} />}
               </Panel>
-            </div>
 
-            <div className="space-y-6">
               <Panel title="Live camera feeds" subtitle="The backend renders the active stream for each camera.">
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   <FeedCard title="CAM-1" src={sessionId ? streamUrl("CAM-1") : null} />
                   <FeedCard title="CAM-2" src={sessionId ? streamUrl("CAM-2") : null} />
                 </div>
@@ -181,7 +176,6 @@ export default function ReviewPage() {
                 )}
               </Panel>
             </div>
-          </div>
         </section>
       </div>
     </main>

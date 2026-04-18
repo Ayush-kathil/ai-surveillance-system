@@ -8,21 +8,26 @@ export default function VideosPage() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#ffffff_0%,#f5f5f5_42%,#ebebeb_100%)] text-black">
-      <div className="mx-auto flex min-h-screen w-full max-w-6xl items-center px-6 py-8 sm:px-10 lg:px-12">
-        <section className="grid w-full gap-6 xl:grid-cols-[0.95fr_1.05fr] fade-in-up">
-          <div className="space-y-6">
+      <div className="mx-auto flex min-h-screen w-full max-w-4xl items-center px-6 py-8 sm:px-10 lg:px-12">
+        <section className="w-full space-y-6 fade-in-up">
+          <div className="text-center space-y-4">
             <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-black px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-white">
               Step 2
             </div>
             <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
               Upload the camera videos.
             </h1>
-            <p className="max-w-xl text-sm leading-7 text-black/65 sm:text-base">
-              Add the two surveillance clips. Each file gets a preview panel, and the next page will show the live camera feeds during detection.
+            <p className="mx-auto max-w-2xl text-sm leading-7 text-black/65 sm:text-base">
+              Add the two surveillance clips and confirm the previews before moving into the live review page.
             </p>
           </div>
 
           <div className="space-y-5 rounded-[2rem] border border-black/10 bg-white p-5 shadow-[0_18px_48px_rgba(0,0,0,0.06)] sm:p-6">
+            <div className="text-center">
+              <p className="text-xs uppercase tracking-[0.24em] text-black/45">Camera uploads</p>
+              <h2 className="mt-2 text-2xl font-bold text-black">CAM-1 and CAM-2 footage</h2>
+            </div>
+
             <UploadCard label="Camera feed 1" hint="Video source for CAM-1." fileName={cam1?.name} onChange={(event) => setCam1(event.target.files?.[0] ?? null)} />
             <UploadCard label="Camera feed 2" hint="Video source for CAM-2." fileName={cam2?.name} onChange={(event) => setCam2(event.target.files?.[0] ?? null)} />
 
@@ -43,7 +48,7 @@ export default function VideosPage() {
               </PreviewCard>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
               <button
                 type="button"
                 onClick={() => setStep(1)}
@@ -51,19 +56,12 @@ export default function VideosPage() {
               >
                 Back
               </button>
-              <button
-                type="button"
-                onClick={() => setStep(3)}
-                disabled={!cam1 || !cam2}
-                className="inline-flex items-center justify-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:bg-black/90 disabled:cursor-not-allowed disabled:bg-black/20"
-              >
-                Next
-              </button>
               <Link
                 href="/review"
-                className="inline-flex items-center justify-center rounded-full border border-black/15 bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-black/[0.03]"
+                onClick={() => setStep(3)}
+                className={`inline-flex items-center justify-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:bg-black/90 ${!cam1 || !cam2 ? "pointer-events-none cursor-not-allowed bg-black/20" : ""}`}
               >
-                Skip to review
+                Next
               </Link>
             </div>
           </div>
