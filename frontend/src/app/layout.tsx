@@ -13,8 +13,8 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Surveillance Command Center",
-  description: "High-speed missing person search dashboard with live video, alerts, and evidence export.",
+  title: "Surveillance System",
+  description: "A monochrome missing-person surveillance console with guided uploads, live streams, alerts, and evidence export.",
 };
 
 export default function RootLayout({
@@ -23,11 +23,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${manrope.variable} ${jetBrainsMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="en" className={`${manrope.variable} ${jetBrainsMono.variable} h-full antialiased`}>
+      <body className="min-h-full flex flex-col bg-white text-black">{children}</body>
     </html>
   );
 }

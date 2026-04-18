@@ -1,6 +1,0 @@
-C:\Users\donay\AppData\Local\Programs\Python\Python310\lib\site-packages\face_recognition_models\__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  from pkg_resources import resource_filename
-Starting Missing Person Detection System...
-Target image: C:\Users\donay\Documents\GIT HUB\surveillance system\missing.jpg
-Missing person face encoding loaded and normalized.
-Processing camera feeds with multithreading enabled.
