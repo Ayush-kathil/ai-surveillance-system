@@ -5,7 +5,7 @@ This repository contains a two-part surveillance demo:
 - A Next.js frontend in `frontend/`
 - A FastAPI backend in `backend/`
 
-The web app lets you upload a reference image plus two camera videos, start an analysis session, watch the alert stream, and export evidence from the browser.
+The web app is split into four pages: a welcome screen, a missing-person photo upload page, a camera upload page, and a live review page that shows streams, alerts, and an exportable evidence report with detected snapshots.
 
 ## How It Works
 
@@ -14,6 +14,13 @@ The web app lets you upload a reference image plus two camera videos, start an a
 3. The backend creates a session, runs detection, and stores alerts in memory.
 4. The frontend polls `/api/alerts/{session_id}` and streams frames from `/api/stream/{session_id}/{cam_id}`.
 5. You review the alerts and export a text report from the UI.
+
+## Frontend Pages
+
+- `/` welcomes the operator and starts the workflow.
+- `/photo` uploads the missing-person image and shows a preview.
+- `/videos` uploads CAM-1 and CAM-2 footage and shows preview windows.
+- `/review` shows the live streams, alert table, backend status, progress bar, and snapshot-rich export.
 
 ## What To Run
 

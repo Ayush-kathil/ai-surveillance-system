@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { WorkflowProvider } from "./workflow-provider";
 
 const manrope = Manrope({
   variable: "--font-ui-sans",
@@ -24,7 +25,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${manrope.variable} ${jetBrainsMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-white text-black">{children}</body>
+      <body className="min-h-full flex flex-col bg-white text-black">
+        <WorkflowProvider>{children}</WorkflowProvider>
+      </body>
     </html>
   );
 }

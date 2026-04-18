@@ -33,7 +33,7 @@ app.add_middleware(
 )
 
 import uuid
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 import asyncio
 
 app.state.sessions = {}
@@ -94,6 +94,20 @@ def get_alerts(session_id: str):
     if session_id not in app.state.sessions:
         return {"alerts": []}
     return {"alerts": app.state.sessions[session_id]["alerts"]}
+
+
+@app.get("/api/snapshots/{session_id}/{filename}")
+def get_snapshot(session_id: str, filename: str):
+    if session_id not in app.state.sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    safe_filename = Path(filename).name
+    snapshot_path = Path(__file__).resolve().parent / "output" / "snapshots" / safe_filename
+
+    if not snapshot_path.exists():
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    return FileResponse(snapshot_path, media_type="image/jpeg", filename=safe_filename)
 
 @app.get("/health")
 def read_root():
