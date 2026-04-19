@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BackArrow } from "../back-arrow";
 import { useWorkflow } from "../workflow-provider";
 
@@ -9,6 +9,56 @@ export default function VideosPage() {
   const router = useRouter();
   const { cam1, cam2, setCam1, setCam2, cam1Preview, cam2Preview, setStep, uploadKey } = useWorkflow();
   const [dragTarget, setDragTarget] = useState<"cam1" | "cam2" | null>(null);
+  const [cam1Progress, setCam1Progress] = useState(0);
+  const [cam2Progress, setCam2Progress] = useState(0);
+
+  useEffect(() => {
+    if (!cam1) {
+      setCam1Progress(0);
+      return;
+    }
+
+    setCam1Progress(0);
+    const durationMs = Math.min(2200, Math.max(750, Math.round((cam1.size / (1024 * 1024)) * 170)));
+    const startedAt = performance.now();
+    let frameId = 0;
+
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / durationMs);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setCam1Progress(Math.round(eased * 100));
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(step);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(step);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [cam1]);
+
+  useEffect(() => {
+    if (!cam2) {
+      setCam2Progress(0);
+      return;
+    }
+
+    setCam2Progress(0);
+    const durationMs = Math.min(2200, Math.max(750, Math.round((cam2.size / (1024 * 1024)) * 170)));
+    const startedAt = performance.now();
+    let frameId = 0;
+
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / durationMs);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setCam2Progress(Math.round(eased * 100));
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(step);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(step);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [cam2]);
 
   return (
     <main className="relative h-[100dvh] overflow-hidden text-black">
@@ -48,6 +98,7 @@ export default function VideosPage() {
                 label="Camera feed 1"
                 hint="Video source for CAM-1."
                 fileName={cam1?.name}
+                progress={cam1Progress}
                 dragActive={dragTarget === "cam1"}
                 onDragOver={(event) => {
                   event.preventDefault();
@@ -69,6 +120,7 @@ export default function VideosPage() {
                 label="Camera feed 2"
                 hint="Video source for CAM-2."
                 fileName={cam2?.name}
+                progress={cam2Progress}
                 dragActive={dragTarget === "cam2"}
                 onDragOver={(event) => {
                   event.preventDefault();
@@ -156,6 +208,7 @@ function UploadCard({
   label,
   hint,
   fileName,
+  progress,
   dragActive,
   onDragOver,
   onDragLeave,
@@ -166,6 +219,7 @@ function UploadCard({
   label: string;
   hint: string;
   fileName?: string;
+  progress: number;
   dragActive?: boolean;
   onDragOver?: (event: React.DragEvent<HTMLLabelElement>) => void;
   onDragLeave?: () => void;
@@ -177,7 +231,7 @@ function UploadCard({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={`block rounded-[1.25rem] border border-dashed bg-white/80 p-3 transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(0,0,0,0.08)] ${dragActive ? "border-black/45 bg-black/[0.06]" : "border-black/20 hover:border-black/35"}`}
+      className={`block rounded-[1.25rem] border border-dashed bg-white/80 p-3 transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(0,0,0,0.08)] ${dragActive ? "scale-[1.01] border-black/45 bg-black/[0.06] shadow-[0_12px_28px_rgba(0,0,0,0.12)]" : "border-black/20 hover:border-black/35"}`}
     >
       <p className="text-sm font-semibold text-black">{label}</p>
       <p className="mt-1 text-xs leading-5 text-black/55">{hint} Drag and drop is supported.</p>
@@ -189,6 +243,17 @@ function UploadCard({
         className="mt-3 block w-full text-xs text-black/70 file:mr-3 file:rounded-full file:border-0 file:bg-black file:px-4 file:py-2 file:text-xs file:font-semibold file:text-white"
       />
       <p className="mt-3 truncate text-xs text-black/50">{fileName ?? "No file selected"}</p>
+      {fileName && (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-black/55">
+            <span>Staging</span>
+            <span>{progress}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full border border-black/10 bg-white">
+            <div className="h-full rounded-full bg-black transition-all duration-300" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      )}
     </label>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BackArrow } from "../back-arrow";
 import { useWorkflow } from "../workflow-provider";
 
@@ -10,6 +10,31 @@ export default function PhotoPage() {
   const router = useRouter();
   const { missingImage, setMissingImage, missingPreview, setStep, uploadKey } = useWorkflow();
   const [dragActive, setDragActive] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  useEffect(() => {
+    if (!missingImage) {
+      setUploadProgress(0);
+      return;
+    }
+
+    setUploadProgress(0);
+    const durationMs = Math.min(1800, Math.max(700, Math.round((missingImage.size / (1024 * 1024)) * 450)));
+    const startedAt = performance.now();
+    let frameId = 0;
+
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / durationMs);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setUploadProgress(Math.round(eased * 100));
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(step);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(step);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [missingImage]);
 
   const handleDrop = (event: React.DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
@@ -52,7 +77,7 @@ export default function PhotoPage() {
               }}
               onDragLeave={() => setDragActive(false)}
               onDrop={handleDrop}
-              className={`block rounded-[1.5rem] border border-dashed p-4 transition ${dragActive ? "border-black/45 bg-black/[0.06]" : "border-black/15 bg-black/[0.02] hover:border-black/30 hover:bg-black/[0.03]"}`}
+              className={`block rounded-[1.5rem] border border-dashed p-4 transition duration-300 ${dragActive ? "scale-[1.01] border-black/45 bg-black/[0.06] shadow-[0_12px_28px_rgba(0,0,0,0.12)]" : "border-black/15 bg-black/[0.02] hover:border-black/30 hover:bg-black/[0.03]"}`}
             >
               <p className="text-sm font-semibold text-black">Choose reference image</p>
               <p className="mt-1 text-xs leading-5 text-black/55">Drop image here or click to browse. The backend uses this photo to generate the facial embedding.</p>
@@ -64,6 +89,17 @@ export default function PhotoPage() {
                 className="mt-4 block w-full text-sm text-black/70 file:mr-3 file:rounded-full file:border-0 file:bg-black file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white"
               />
               <p className="mt-3 truncate text-xs text-black/50">{missingImage?.name ?? "No file selected"}</p>
+              {missingImage && (
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-black/55">
+                    <span>Staging</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full border border-black/10 bg-white">
+                    <div className="h-full rounded-full bg-black transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                  </div>
+                </div>
+              )}
             </label>
 
             <div className="overflow-hidden rounded-[1.5rem] border border-black/10 bg-black/[0.02]">
