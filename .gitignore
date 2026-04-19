@@ -14,6 +14,7 @@ __pycache__/
 .turbo/
 node_modules/
 _archive/
+data/
 backend/output/
 missing_person_project/output/
 output/
