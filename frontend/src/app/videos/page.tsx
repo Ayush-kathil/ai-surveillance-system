@@ -1,10 +1,11 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useWorkflow } from "../workflow-provider";
 
 export default function VideosPage() {
-  const { cam1, cam2, setCam1, setCam2, cam1Preview, cam2Preview, setStep } = useWorkflow();
+  const router = useRouter();
+  const { cam1, cam2, setCam1, setCam2, cam1Preview, cam2Preview, setStep, uploadKey } = useWorkflow();
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#ffffff_0%,#f5f5f5_42%,#ebebeb_100%)] text-black">
@@ -28,8 +29,8 @@ export default function VideosPage() {
               <h2 className="mt-2 text-2xl font-bold text-black">CAM-1 and CAM-2 footage</h2>
             </div>
 
-            <UploadCard label="Camera feed 1" hint="Video source for CAM-1." fileName={cam1?.name} onChange={(event) => setCam1(event.target.files?.[0] ?? null)} />
-            <UploadCard label="Camera feed 2" hint="Video source for CAM-2." fileName={cam2?.name} onChange={(event) => setCam2(event.target.files?.[0] ?? null)} />
+            <UploadCard keyName={`cam1-${uploadKey}`} label="Camera feed 1" hint="Video source for CAM-1." fileName={cam1?.name} onChange={(event) => setCam1(event.target.files?.[0] ?? null)} />
+            <UploadCard keyName={`cam2-${uploadKey}`} label="Camera feed 2" hint="Video source for CAM-2." fileName={cam2?.name} onChange={(event) => setCam2(event.target.files?.[0] ?? null)} />
 
             <div className="grid gap-4 lg:grid-cols-2">
               <PreviewCard title="CAM-1 preview">
@@ -56,13 +57,17 @@ export default function VideosPage() {
               >
                 Back
               </button>
-              <Link
-                href="/review"
-                onClick={() => setStep(3)}
-                className={`inline-flex items-center justify-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:bg-black/90 ${!cam1 || !cam2 ? "pointer-events-none cursor-not-allowed bg-black/20" : ""}`}
+              <button
+                type="button"
+                onClick={() => {
+                  setStep(3);
+                  router.push("/review");
+                }}
+                disabled={!cam1 || !cam2}
+                className="inline-flex items-center justify-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:bg-black/90 disabled:cursor-not-allowed disabled:bg-black/20"
               >
                 Next
-              </Link>
+              </button>
             </div>
           </div>
         </section>
@@ -72,11 +77,13 @@ export default function VideosPage() {
 }
 
 function UploadCard({
+  keyName,
   label,
   hint,
   fileName,
   onChange,
 }: {
+  keyName: string;
   label: string;
   hint: string;
   fileName?: string;
@@ -87,6 +94,7 @@ function UploadCard({
       <p className="text-sm font-semibold text-black">{label}</p>
       <p className="mt-1 text-xs leading-5 text-black/55">{hint}</p>
       <input
+        key={keyName}
         type="file"
         accept="video/*"
         onChange={onChange}

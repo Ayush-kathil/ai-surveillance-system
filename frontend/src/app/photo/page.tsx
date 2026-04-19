@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useWorkflow } from "../workflow-provider";
 
 export default function PhotoPage() {
-  const { missingImage, setMissingImage, missingPreview, setStep } = useWorkflow();
+  const router = useRouter();
+  const { missingImage, setMissingImage, missingPreview, setStep, uploadKey } = useWorkflow();
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#ffffff_0%,#f5f5f5_42%,#ebebeb_100%)] text-black">
@@ -32,6 +34,7 @@ export default function PhotoPage() {
               <p className="text-sm font-semibold text-black">Choose reference image</p>
               <p className="mt-1 text-xs leading-5 text-black/55">The backend uses this photo to generate the facial embedding.</p>
               <input
+                key={`missing-image-${uploadKey}`}
                 type="file"
                 accept="image/*"
                 onChange={(event) => setMissingImage(event.target.files?.[0] ?? null)}
@@ -64,13 +67,17 @@ export default function PhotoPage() {
               >
                 Back
               </Link>
-              <Link
-                href="/videos"
-                onClick={() => setStep(2)}
-                className={`inline-flex items-center justify-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:bg-black/90 ${!missingImage ? "pointer-events-none cursor-not-allowed bg-black/20" : ""}`}
+              <button
+                type="button"
+                onClick={() => {
+                  setStep(2);
+                  router.push("/videos");
+                }}
+                disabled={!missingImage}
+                className="inline-flex items-center justify-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:bg-black/90 disabled:cursor-not-allowed disabled:bg-black/20"
               >
                 Next
-              </Link>
+              </button>
             </div>
           </div>
         </section>

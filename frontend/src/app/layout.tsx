@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
-import { Manrope, JetBrains_Mono } from "next/font/google";
+import { Sora, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { WorkflowProvider } from "./workflow-provider";
 
-const manrope = Manrope({
+const sora = Sora({
   variable: "--font-ui-sans",
   subsets: ["latin"],
 });
 
-const jetBrainsMono = JetBrains_Mono({
+const ibmPlexMono = IBM_Plex_Mono({
   variable: "--font-ui-mono",
+  weight: ["400", "500", "600"],
   subsets: ["latin"],
 });
 
@@ -24,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${manrope.variable} ${jetBrainsMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-white text-black">
+    <html lang="en" className={`${sora.variable} ${ibmPlexMono.variable} h-full antialiased`}>
+      <body className="min-h-full flex flex-col text-black">
         <WorkflowProvider>{children}</WorkflowProvider>
       </body>
     </html>

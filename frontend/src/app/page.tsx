@@ -2,36 +2,70 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#ffffff_0%,#f5f5f5_42%,#e8e8e8_100%)] text-black">
-      <div className="relative mx-auto flex min-h-screen w-full max-w-6xl items-center px-6 py-10 sm:px-10 lg:px-12">
-        <div className="pointer-events-none absolute -left-24 top-24 h-72 w-72 rounded-full bg-black/5 blur-3xl animate-drift" />
-        <div className="pointer-events-none absolute right-0 top-0 h-96 w-96 rounded-full bg-white blur-3xl animate-drift-delayed" />
+    <main className="app-shell relative min-h-screen overflow-hidden text-black">
+      <div className="pointer-events-none absolute inset-0 hero-grid opacity-80" />
+      <div className="pointer-events-none absolute -left-24 top-24 h-80 w-80 rounded-full bg-[#f2e1d0]/70 blur-3xl float-slow" />
+      <div className="pointer-events-none absolute right-[-4rem] top-[-2rem] h-[28rem] w-[28rem] rounded-full bg-[#c8d6e6]/50 blur-3xl float-slow-delayed" />
 
-        <section className="relative z-10 max-w-3xl fade-in-up">
-          <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-black px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-white">
-            Surveillance System
+      <div className="relative mx-auto grid min-h-screen w-full max-w-7xl place-items-center px-6 py-10 sm:px-10 lg:px-12">
+        <section className="reveal space-y-8 text-center">
+          <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-black/15 bg-white/80 px-5 py-2 text-[11px] font-semibold uppercase tracking-[0.32em] text-black shadow-[0_12px_30px_rgba(0,0,0,0.08)] backdrop-blur-sm">
+            Smart Surveillance Platform
           </div>
-          <h1 className="mt-6 text-5xl font-black tracking-tight sm:text-6xl lg:text-7xl">
-            Missing person detection, built as a clean guided console.
+
+          <h1 className="mx-auto max-w-5xl text-balance text-5xl font-extrabold tracking-[-0.03em] sm:text-6xl lg:text-7xl">
+            Human-centered detection intelligence for missing person investigations.
           </h1>
-          <p className="mt-6 max-w-2xl text-sm leading-7 text-black/65 sm:text-base">
-            Start with a single welcome page, then move through the photo upload page, the camera upload page, and the live review page. The backend stays visible the whole time with a simple status dot.
+
+          <p className="mx-auto max-w-3xl text-pretty text-sm leading-7 text-black/70 sm:text-base">
+            A refined 3-step workflow designed for operators under pressure. Upload a reference image, attach camera feeds, and review live matches with confident, evidence-ready exports.
           </p>
 
-          <div className="mt-10 flex flex-wrap gap-3 text-xs uppercase tracking-[0.24em] text-black/55">
-            <span className="rounded-full border border-black/10 bg-white px-4 py-2">Welcome</span>
-            <span className="rounded-full border border-black/10 bg-white px-4 py-2">Upload</span>
-            <span className="rounded-full border border-black/10 bg-white px-4 py-2">Review</span>
-            <span className="rounded-full border border-black/10 bg-white px-4 py-2">Export</span>
+          <div className="reveal-delay-1 mx-auto flex max-w-3xl flex-wrap justify-center gap-3 text-xs uppercase tracking-[0.24em] text-black/60">
+            <span className="rounded-full border border-black/15 bg-white/85 px-4 py-2">Photo Match</span>
+            <span className="rounded-full border border-black/15 bg-white/85 px-4 py-2">Dual Stream</span>
+            <span className="rounded-full border border-black/15 bg-white/85 px-4 py-2">Live Alerts</span>
+            <span className="rounded-full border border-black/15 bg-white/85 px-4 py-2">Evidence Export</span>
           </div>
 
-          <div className="mt-10 flex flex-col gap-4 sm:flex-row">
+          <div className="reveal-delay-2 mx-auto flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link
               href="/photo"
-              className="inline-flex items-center justify-center rounded-full bg-black px-6 py-3 text-sm font-semibold text-white transition duration-300 hover:scale-[1.02] hover:bg-black/90"
+              className="group inline-flex items-center justify-center rounded-full border border-black bg-black px-7 py-3 text-sm font-semibold text-white transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(0,0,0,0.25)]"
             >
-              Start workflow
+              Start Workflow
+              <span className="ml-2 transition duration-300 group-hover:translate-x-0.5">→</span>
             </Link>
+            <Link
+              href="/review"
+              className="inline-flex items-center justify-center rounded-full border border-black/20 bg-white/90 px-7 py-3 text-sm font-semibold text-black transition duration-300 hover:-translate-y-0.5 hover:bg-white"
+            >
+              Open Review Console
+            </Link>
+          </div>
+
+          <div className="reveal-delay-3 mx-auto grid w-full max-w-5xl gap-4 pt-5 md:grid-cols-3">
+            <article className="glass-panel p-5 text-left">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-black/45">01</p>
+              <h2 className="mt-2 text-xl font-bold">Reference Upload</h2>
+              <p className="mt-2 text-sm leading-6 text-black/65">
+                Operators load a clear portrait photo to initialize facial embedding and reduce false positives.
+              </p>
+            </article>
+            <article className="glass-panel p-5 text-left">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-black/45">02</p>
+              <h2 className="mt-2 text-xl font-bold">Camera Intelligence</h2>
+              <p className="mt-2 text-sm leading-6 text-black/65">
+                Two synchronized camera inputs are processed in one control view with frame-level transparency.
+              </p>
+            </article>
+            <article className="glass-panel p-5 text-left">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-black/45">03</p>
+              <h2 className="mt-2 text-xl font-bold">Evidence Actions</h2>
+              <p className="mt-2 text-sm leading-6 text-black/65">
+                Capture time, score, snapshot, and export in one step for investigators and reporting teams.
+              </p>
+            </article>
           </div>
         </section>
       </div>
