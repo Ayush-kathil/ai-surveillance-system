@@ -58,7 +58,7 @@ type WorkflowState = {
   cam2Preview: string | null;
   resetSession: () => void;
   handleRunAnalysis: () => Promise<void>;
-  handleResetPlatform: () => Promise<void>;
+  handleResetPlatform: () => Promise<boolean>;
   handleExportEvidence: () => Promise<void>;
   streamUrl: (camera: "CAM-1" | "CAM-2") => string;
   snapshotUrl: (filename: string) => string;
@@ -285,9 +285,11 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       setJobState("idle");
       setResetInfo("Platform reset completed. Temporary files were cleaned and session state was cleared.");
       setStatus("online");
+      return true;
     } catch (resetError) {
       setStatus("offline");
       setError(resetError instanceof Error ? resetError.message : "Failed to reset platform.");
+      return false;
     } finally {
       setResetting(false);
     }

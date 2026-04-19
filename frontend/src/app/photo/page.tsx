@@ -2,16 +2,31 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { BackArrow } from "../back-arrow";
 import { useWorkflow } from "../workflow-provider";
 
 export default function PhotoPage() {
   const router = useRouter();
   const { missingImage, setMissingImage, missingPreview, setStep, uploadKey } = useWorkflow();
+  const [dragActive, setDragActive] = useState(false);
+
+  const handleDrop = (event: React.DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+    const file = event.dataTransfer.files?.[0] ?? null;
+    if (file && file.type.startsWith("image/")) {
+      setMissingImage(file);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#ffffff_0%,#f5f5f5_42%,#ebebeb_100%)] text-black">
       <div className="mx-auto flex min-h-screen w-full max-w-4xl items-center px-6 py-8 sm:px-10 lg:px-12">
         <section className="w-full space-y-6 fade-in-up">
+          <div className="flex items-center justify-start">
+            <BackArrow fallbackHref="/" />
+          </div>
           <div className="text-center space-y-4">
             <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-black px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-white">
               Step 1
@@ -30,9 +45,17 @@ export default function PhotoPage() {
               <h2 className="mt-2 text-2xl font-bold text-black">Missing person image</h2>
             </div>
 
-            <label className="block rounded-[1.5rem] border border-dashed border-black/15 bg-black/[0.02] p-4 transition hover:border-black/30 hover:bg-black/[0.03]">
+            <label
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragLeave={() => setDragActive(false)}
+              onDrop={handleDrop}
+              className={`block rounded-[1.5rem] border border-dashed p-4 transition ${dragActive ? "border-black/45 bg-black/[0.06]" : "border-black/15 bg-black/[0.02] hover:border-black/30 hover:bg-black/[0.03]"}`}
+            >
               <p className="text-sm font-semibold text-black">Choose reference image</p>
-              <p className="mt-1 text-xs leading-5 text-black/55">The backend uses this photo to generate the facial embedding.</p>
+              <p className="mt-1 text-xs leading-5 text-black/55">Drop image here or click to browse. The backend uses this photo to generate the facial embedding.</p>
               <input
                 key={`missing-image-${uploadKey}`}
                 type="file"

@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { BackArrow } from "../back-arrow";
 import { useWorkflow } from "../workflow-provider";
 
 export default function ReviewPage() {
+  const router = useRouter();
   const {
     alerts,
     sessionId,
@@ -41,9 +44,12 @@ export default function ReviewPage() {
 
       <div className="relative mx-auto grid h-full w-full max-w-[1500px] grid-rows-[auto,1fr] gap-4 px-4 py-4 sm:px-8 sm:py-6">
         <header className="glass-panel reveal flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.28em] text-black/48">Step 3</p>
-            <h1 className="mt-1 text-xl font-extrabold tracking-tight sm:text-2xl">Live Analysis and Evidence Console</h1>
+          <div className="flex items-center gap-3">
+            <BackArrow fallbackHref="/videos" />
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.28em] text-black/48">Step 3</p>
+              <h1 className="mt-1 text-xl font-extrabold tracking-tight sm:text-2xl">Live Analysis and Evidence Console</h1>
+            </div>
           </div>
           <div className="inline-flex items-center gap-2 rounded-full border border-black/15 bg-white/90 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black/70">
             <span className={`h-2.5 w-2.5 rounded-full ${status === "online" ? "bg-emerald-500" : status === "offline" ? "bg-rose-500" : "bg-zinc-400"}`} />
@@ -191,7 +197,12 @@ export default function ReviewPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleResetPlatform}
+                  onClick={async () => {
+                    const ok = await handleResetPlatform();
+                    if (ok) {
+                      router.push("/");
+                    }
+                  }}
                   disabled={resetting}
                   className="rounded-full border border-black/15 bg-white px-4 py-2.5 text-sm font-semibold transition hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                 >

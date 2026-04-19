@@ -1,36 +1,139 @@
 # Surveillance System
 
-This repository contains a two-part surveillance demo:
+A production-minded missing-person surveillance workflow built with a Next.js operator console and a FastAPI + computer vision backend.
 
-- A Next.js frontend in `frontend/`
-- A FastAPI backend in `backend/`
+The platform is designed for fast operator decisions:
 
-The web app is split into four pages: a welcome screen, a missing-person photo upload page, a camera upload page, and a live review page that shows streams, alerts, and an exportable evidence report with detected snapshots.
+- Guided 3-step flow (photo upload -> camera uploads -> live review)
+- Real asynchronous backend analysis jobs with progress reporting
+- Profile-based detection modes (Fast, Balanced, Accurate)
+- Snapshot-backed alerts with timestamps and similarity metadata
+- Formal PDF evidence export with branding and investigator signature section
 
-## How It Works
+## Highlights
 
-1. You upload the missing-person image and two video files.
-2. The frontend sends them to the backend at `/api/analyze`.
-3. The backend creates a session, runs detection, and stores alerts in memory.
-4. The frontend polls `/api/alerts/{session_id}` and streams frames from `/api/stream/{session_id}/{cam_id}`.
-5. You review the alerts and export a text report from the UI.
+- Async job pipeline: backend analysis runs in background tasks per session
+- Real progress API: frontend polls true frame-processing progress
+- Profile presets: operators can choose speed vs precision tradeoff
+- Drag-and-drop uploads: photo and video stages support drop zones
+- Reset platform workflow: clears runtime state and returns user to home
+- Top-left back navigation: consistent arrow navigation in workflow pages
 
-## Frontend Pages
+## Tech Stack
 
-- `/` welcomes the operator and starts the workflow.
-- `/photo` uploads the missing-person image and shows a preview.
-- `/videos` uploads CAM-1 and CAM-2 footage and shows preview windows.
-- `/review` shows the live streams, alert table, backend status, progress bar, and snapshot-rich export.
+- Frontend: Next.js 16, React 19, Tailwind CSS 4
+- Backend: FastAPI, OpenCV, DeepFace, Ultralytics YOLO
+- Evidence export: jsPDF
 
-## What To Run
+## Architecture
 
-Use the scripts in the repository root for the full local stack:
+1. Operator uploads reference image + CAM-1/CAM-2 videos.
+2. Frontend sends files to `/api/analyze` with selected profile.
+3. Backend creates a session and starts async analysis workers.
+4. Frontend polls:
+	 - `/api/progress/{session_id}` for real progress
+	 - `/api/alerts/{session_id}` for detections
+5. Operator reviews detections and exports a formal PDF report.
 
-- First-time setup: `powershell -ExecutionPolicy Bypass -File .\setup_system.ps1`
-- Normal start: `powershell -ExecutionPolicy Bypass -File .\start_app.ps1`
-- Clean start: `powershell -ExecutionPolicy Bypass -File .\run_full_project.ps1`
+## User Workflow
 
-If you only want the frontend:
+### 1) Home
+
+- Entry page with workflow overview and actions.
+
+### 2) Photo Upload (`/photo`)
+
+- Upload or drag-and-drop a missing-person reference image.
+- Live image preview before continuing.
+- Top-left back arrow for quick navigation.
+
+### 3) Video Upload (`/videos`)
+
+- Upload or drag-and-drop CAM-1 and CAM-2 clips.
+- Live preview panels for both video inputs.
+- Top-left back arrow.
+
+### 4) Review Console (`/review`)
+
+- Real backend progress bar and job state display.
+- Live stream panels and alert timeline.
+- Evidence panel with first alert timestamp visibility.
+- Formal PDF export.
+- Reset Session and Reset Platform controls.
+- Top-left back arrow.
+
+## API Reference
+
+### Health
+
+- `GET /health`
+
+### Start Analysis Job
+
+- `POST /api/analyze`
+- Form fields:
+	- `missing_image` (file)
+	- `cam1_video` (file)
+	- `cam2_video` (file)
+	- `profile` (`fast` | `balanced` | `accurate`)
+
+### Progress
+
+- `GET /api/progress/{session_id}`
+- Response includes:
+	- `state` (`pending` | `running` | `completed` | `failed`)
+	- `progress_percent`
+	- `processed_frames`
+	- `total_frames`
+	- `current_camera`
+	- `alerts_count`
+	- `profile`
+	- `error`
+
+### Alerts
+
+- `GET /api/alerts/{session_id}`
+
+### Streams
+
+- `GET /api/stream/{session_id}/{cam_id}`
+- `cam_id`: `CAM-1` or `CAM-2`
+
+### Snapshot Fetch
+
+- `GET /api/snapshots/{session_id}/{filename}`
+
+### Reset Workspace
+
+- `POST /api/system/reset-workspace`
+- Body:
+	- `session_id` (optional)
+	- `prune_outputs` (boolean)
+
+## Detection Profiles
+
+- `Fast`: prioritizes speed, lower thresholds, higher frame stride
+- `Balanced`: default operational mode
+- `Accurate`: stricter thresholds, denser evaluation
+
+Profile behavior is mapped server-side in `backend/engine.py` and can be tuned through environment variables.
+
+## Local Setup
+
+### One-command setup/start (recommended)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup_system.ps1
+powershell -ExecutionPolicy Bypass -File .\start_app.ps1
+```
+
+### Clean full run
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_full_project.ps1
+```
+
+### Frontend only
 
 ```powershell
 cd frontend
@@ -38,7 +141,7 @@ npm install
 npm run dev
 ```
 
-If you only want the backend:
+### Backend only
 
 ```powershell
 cd backend
@@ -48,96 +151,86 @@ pip install -r requirements.txt
 uvicorn app:app --reload --port 8001
 ```
 
-## Vercel Deployment
+## Deployment
 
-This project is easiest to deploy to Vercel by pointing the Vercel project root to `frontend/`.
+### Frontend (Vercel)
 
-Set these values in Vercel:
+- Root directory: `frontend`
+- Install: `npm install`
+- Build: `npm run build`
+- Env:
+	- `NEXT_PUBLIC_BACKEND_URL=https://your-backend-host`
 
-- Root Directory: `frontend`
-- Build Command: `npm run build`
-- Install Command: `npm install`
-- Environment Variable: `NEXT_PUBLIC_BACKEND_URL=https://your-backend-host.example`
+### Backend
 
-Important: Vercel will host the frontend only. The backend must be deployed separately and reachable from the browser.
+Deploy FastAPI separately (VM/container/platform service) and ensure CORS/network access from frontend.
 
-## Main Commands
+## Environment and Tuning
 
-Frontend:
+Example backend tuning knobs:
 
-```powershell
-cd frontend
-npm install
-npm run dev
-npm run build
-npm run start
-npm run lint
-```
+- `MATCH_THRESHOLD`
+- `YOLO_CONFIDENCE`
+- `MAX_FRAME_WIDTH`
+- `BASE_FRAME_STRIDE`
+- `HIGH_FPS_STRIDE`
+- `MATCH_CONFIRM_FRAMES`
+- `SEGMENT_SECONDS`
 
-Backend:
+These settings control speed/accuracy equilibrium for different hardware.
 
-```powershell
-cd backend
-pip install -r requirements.txt
-uvicorn app:app --reload --port 8001
-```
-
-Repository scripts:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup_system.ps1
-powershell -ExecutionPolicy Bypass -File .\start_app.ps1
-powershell -ExecutionPolicy Bypass -File .\run_full_project.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\cleanup_workspace.ps1 -WhatIf
-```
-
-## Project Layout
+## Project Structure
 
 ```text
-backend/                  FastAPI API and video processing engine
-frontend/                 Next.js UI for uploads, alerts, and evidence export
-scripts/                  Cleanup and maintenance scripts
-start_app.ps1             One-command local startup
-setup_system.ps1          One-time dependency and model setup
-run_full_project.ps1      Cleanup plus startup flow
-_archive/                 Legacy material kept out of the active app
-missing_person_project/    Older standalone project and documentation
+backend/                   FastAPI API, async jobs, CV engine
+frontend/                  Next.js operator UI
+scripts/                   Workspace cleanup utilities
+run_full_project.ps1       Full clean + launch flow
+setup_system.ps1           One-time setup script
+start_app.ps1              Standard start script
+_archive/                  Archived legacy material
+missing_person_project/    Historical project assets/docs
 ```
 
-## Configuration Notes
+## Professional Reporting Output
 
-- The frontend reads `NEXT_PUBLIC_BACKEND_URL`.
-- If the variable is not set, it defaults to `http://localhost:8001`.
-- The backend health check is exposed at `/health`.
-- Alert data is exposed at `/api/alerts/{session_id}`.
-- Live video streams are exposed at `/api/stream/{session_id}/{cam_id}`.
+PDF export contains:
 
-## Files Ignored By Git
-
-Generated or local-only files are ignored, including:
-
-- Python caches and virtual environments
-- Next.js build output and `node_modules`
-- Output folders, logs, database files, and local environment files
-- Vercel local metadata
-
-## Legacy Files
-
-The following areas are not part of the Vercel deployment path and can be treated as legacy support material:
-
-- `_archive/`
-- `missing_person_project/`
+- Branded header/footer
+- Session metadata
+- Alert-by-alert breakdown
+- Snapshot evidence
+- Investigator signature and date fields
 
 ## Troubleshooting
 
-- If the UI shows the backend as offline, confirm the API is running on port `8001` or set `NEXT_PUBLIC_BACKEND_URL`.
-- If uploads fail, confirm the backend has `python-multipart` installed.
-- If Vercel builds fail, make sure the project root is set to `frontend/`.
-- If face matching is too strict or too loose, adjust the backend thresholds in the engine/config files.
+- Backend offline in UI:
+	- Verify backend is running on expected host/port
+	- Check `NEXT_PUBLIC_BACKEND_URL`
+- No alerts appearing:
+	- Confirm usable reference image quality
+	- Try `Fast` profile for earliest detection signal
+	- Check `/api/progress/{session_id}` for `failed` state and error text
+- Upload issues:
+	- Ensure `python-multipart` is installed in backend environment
 
-## Git Workflow
+## Verification Commands
 
-Use these commands when you are ready to publish changes:
+```powershell
+cd frontend
+npm run build
+
+cd ..\backend
+python -m py_compile app.py engine.py
+```
+
+## Developer
+
+- Name: Ayush Kathil
+- LinkedIn: https://www.linkedin.com/in/ayushkathil/
+- GitHub: https://github.com/Ayush-kathil
+
+## Git Workflow (Signed-off)
 
 ```powershell
 git status
@@ -146,19 +239,4 @@ git commit -s -m "Describe the change"
 git push origin main
 ```
 
-The `-s` flag adds a signed-off-by line to the commit, which is the standard sign-off format for clean project history.
-
-## Deployment Notes
-
-- The frontend is the part that goes to Vercel.
-- The backend should be deployed separately to a server or container platform that can keep FastAPI running.
-- Set `NEXT_PUBLIC_BACKEND_URL` to the public backend URL before deploying the frontend.
-- If you want a local production-style frontend check, run `cd frontend` followed by `npm run build` and `npm run start`.
-
-## Summary
-
-For day-to-day work, the shortest path is:
-
-1. Run `powershell -ExecutionPolicy Bypass -File .\setup_system.ps1` once.
-2. Run `powershell -ExecutionPolicy Bypass -File .\start_app.ps1` to launch the full stack.
-3. Deploy the frontend on Vercel from the `frontend/` folder and point it at your backend URL.
+The `-s` flag adds a sign-off line for clean contribution history.

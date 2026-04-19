@@ -1,11 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { BackArrow } from "../back-arrow";
 import { useWorkflow } from "../workflow-provider";
 
 export default function VideosPage() {
   const router = useRouter();
   const { cam1, cam2, setCam1, setCam2, cam1Preview, cam2Preview, setStep, uploadKey } = useWorkflow();
+  const [dragTarget, setDragTarget] = useState<"cam1" | "cam2" | null>(null);
 
   return (
     <main className="relative h-[100dvh] overflow-hidden text-black">
@@ -15,9 +18,12 @@ export default function VideosPage() {
 
       <div className="relative mx-auto grid h-full w-full max-w-7xl grid-rows-[auto,1fr,auto] gap-4 px-4 py-4 sm:px-8 sm:py-6 lg:px-10">
         <header className="glass-panel reveal flex items-center justify-between gap-4 px-4 py-3">
-          <div>
+          <div className="flex items-center gap-3">
+            <BackArrow fallbackHref="/photo" />
+            <div>
             <p className="text-[11px] uppercase tracking-[0.28em] text-black/50">Step 2</p>
             <h1 className="mt-1 text-xl font-extrabold tracking-tight sm:text-2xl">Camera Upload and Preview Grid</h1>
+            </div>
           </div>
           <div className="rounded-full border border-black/15 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black/70">
             No Scroll Dashboard
@@ -37,8 +43,48 @@ export default function VideosPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <UploadCard keyName={`cam1-${uploadKey}`} label="Camera feed 1" hint="Video source for CAM-1." fileName={cam1?.name} onChange={(event) => setCam1(event.target.files?.[0] ?? null)} />
-              <UploadCard keyName={`cam2-${uploadKey}`} label="Camera feed 2" hint="Video source for CAM-2." fileName={cam2?.name} onChange={(event) => setCam2(event.target.files?.[0] ?? null)} />
+              <UploadCard
+                keyName={`cam1-${uploadKey}`}
+                label="Camera feed 1"
+                hint="Video source for CAM-1."
+                fileName={cam1?.name}
+                dragActive={dragTarget === "cam1"}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragTarget("cam1");
+                }}
+                onDragLeave={() => setDragTarget((target) => (target === "cam1" ? null : target))}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragTarget(null);
+                  const file = event.dataTransfer.files?.[0] ?? null;
+                  if (file && file.type.startsWith("video/")) {
+                    setCam1(file);
+                  }
+                }}
+                onChange={(event) => setCam1(event.target.files?.[0] ?? null)}
+              />
+              <UploadCard
+                keyName={`cam2-${uploadKey}`}
+                label="Camera feed 2"
+                hint="Video source for CAM-2."
+                fileName={cam2?.name}
+                dragActive={dragTarget === "cam2"}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragTarget("cam2");
+                }}
+                onDragLeave={() => setDragTarget((target) => (target === "cam2" ? null : target))}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragTarget(null);
+                  const file = event.dataTransfer.files?.[0] ?? null;
+                  if (file && file.type.startsWith("video/")) {
+                    setCam2(file);
+                  }
+                }}
+                onChange={(event) => setCam2(event.target.files?.[0] ?? null)}
+              />
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
@@ -110,18 +156,31 @@ function UploadCard({
   label,
   hint,
   fileName,
+  dragActive,
+  onDragOver,
+  onDragLeave,
+  onDrop,
   onChange,
 }: {
   keyName: string;
   label: string;
   hint: string;
   fileName?: string;
+  dragActive?: boolean;
+  onDragOver?: (event: React.DragEvent<HTMLLabelElement>) => void;
+  onDragLeave?: () => void;
+  onDrop?: (event: React.DragEvent<HTMLLabelElement>) => void;
   onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
-    <label className="block rounded-[1.25rem] border border-dashed border-black/20 bg-white/80 p-3 transition duration-300 hover:-translate-y-0.5 hover:border-black/35 hover:shadow-[0_10px_24px_rgba(0,0,0,0.08)]">
+    <label
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`block rounded-[1.25rem] border border-dashed bg-white/80 p-3 transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(0,0,0,0.08)] ${dragActive ? "border-black/45 bg-black/[0.06]" : "border-black/20 hover:border-black/35"}`}
+    >
       <p className="text-sm font-semibold text-black">{label}</p>
-      <p className="mt-1 text-xs leading-5 text-black/55">{hint}</p>
+      <p className="mt-1 text-xs leading-5 text-black/55">{hint} Drag and drop is supported.</p>
       <input
         key={keyName}
         type="file"
