@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import warnings
 import time
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -41,9 +42,35 @@ MAX_PERSONS_PER_FRAME = int(os.getenv("MAX_PERSONS_PER_FRAME", "3"))
 MAX_FRAME_WIDTH = int(os.getenv("MAX_FRAME_WIDTH", "960"))
 PERSON_CROP_PADDING = int(os.getenv("PERSON_CROP_PADDING", "24"))
 MATCH_RESET_FRAMES = max(1, int(os.getenv("MATCH_RESET_FRAMES", "4")))
+MATCH_CONFIRM_FRAMES = max(1, int(os.getenv("MATCH_CONFIRM_FRAMES", "1")))
+BASE_FRAME_STRIDE = max(1, int(os.getenv("BASE_FRAME_STRIDE", "1")))
+HIGH_FPS_THRESHOLD = float(os.getenv("HIGH_FPS_THRESHOLD", "24"))
+HIGH_FPS_STRIDE = max(BASE_FRAME_STRIDE, int(os.getenv("HIGH_FPS_STRIDE", "2")))
 SNAPSHOT_DIR = Path(os.getenv("MATCH_SNAPSHOT_DIR", "output/snapshots"))
 YOLO_DEVICE = 0 if torch is not None and torch.cuda.is_available() else "cpu"
 YOLO_HALF = bool(torch is not None and torch.cuda.is_available())
+SEGMENT_SECONDS = float(os.getenv("SEGMENT_SECONDS", "5"))
+
+PROFILE_PRESETS: dict[str, dict[str, float]] = {
+    "fast": {
+        "match_threshold": max(0.75, MATCH_THRESHOLD - 0.05),
+        "yolo_confidence": max(0.25, YOLO_CONFIDENCE - 0.05),
+        "base_stride": max(2, BASE_FRAME_STRIDE),
+        "confirm_frames": max(1, MATCH_CONFIRM_FRAMES - 1),
+    },
+    "balanced": {
+        "match_threshold": MATCH_THRESHOLD,
+        "yolo_confidence": YOLO_CONFIDENCE,
+        "base_stride": BASE_FRAME_STRIDE,
+        "confirm_frames": MATCH_CONFIRM_FRAMES,
+    },
+    "accurate": {
+        "match_threshold": min(0.95, MATCH_THRESHOLD + 0.03),
+        "yolo_confidence": min(0.7, YOLO_CONFIDENCE + 0.05),
+        "base_stride": 1,
+        "confirm_frames": max(2, MATCH_CONFIRM_FRAMES + 1),
+    },
+}
 
 
 @dataclass
@@ -64,6 +91,25 @@ class MatchAlert:
 
 
 _yolo_model: YOLO | None = None
+
+
+def get_profile_config(profile: str | None) -> dict[str, float]:
+    normalized = (profile or "balanced").strip().lower()
+    return PROFILE_PRESETS.get(normalized, PROFILE_PRESETS["balanced"])
+
+
+def _build_segments(total_frames: int, fps: float, segment_seconds: float = SEGMENT_SECONDS) -> list[tuple[int, int]]:
+    if total_frames <= 0:
+        return [(0, -1)]
+
+    segment_len = max(1, int(fps * max(1.0, segment_seconds)))
+    segments: list[tuple[int, int]] = []
+    start = 0
+    while start < total_frames:
+        end = min(total_frames - 1, start + segment_len - 1)
+        segments.append((start, end))
+        start = end + 1
+    return segments
 
 
 def _normalize(embedding: np.ndarray) -> np.ndarray:
@@ -218,6 +264,194 @@ def _append_match_alert(
     alerts_list.append(alert.__dict__)
 
 
+def _detect_candidates(
+    frame: np.ndarray,
+    *,
+    yolo_confidence: float,
+) -> list[tuple[float, tuple[int, int, int, int], np.ndarray]]:
+    detections = get_yolo_model().predict(
+        frame,
+        classes=[PERSON_CLASS_ID],
+        conf=yolo_confidence,
+        imgsz=YOLO_IMAGE_SIZE,
+        device=YOLO_DEVICE,
+        half=YOLO_HALF,
+        verbose=False,
+    )
+
+    candidates: list[tuple[float, tuple[int, int, int, int], np.ndarray]] = []
+    for result in detections:
+        for box in result.boxes:
+            class_id = int(box.cls[0])
+            if class_id != PERSON_CLASS_ID:
+                continue
+
+            confidence = float(box.conf[0])
+            if confidence < yolo_confidence:
+                continue
+
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            crop = _expand_crop(frame, x1, y1, x2, y2)
+            if crop.size == 0:
+                continue
+
+            try:
+                embedding = _extract_embedding(crop, enforce_detection=False)
+            except Exception:
+                continue
+
+            candidates.append((confidence, (x1, y1, x2, y2), embedding))
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates
+
+
+def _best_match_from_candidates(
+    candidates: list[tuple[float, tuple[int, int, int, int], np.ndarray]],
+    target_encoding: np.ndarray,
+) -> FaceMatch | None:
+    best_match: FaceMatch | None = None
+    for _, (x1, y1, x2, y2), candidate_embedding in candidates[:MAX_PERSONS_PER_FRAME]:
+        similarity = cosine_similarity(target_encoding, candidate_embedding)
+        distance = euclidean_distance(target_encoding, candidate_embedding)
+
+        if best_match is None or similarity > best_match.similarity:
+            best_match = FaceMatch(
+                location=(x1, y1, x2, y2),
+                similarity=similarity,
+                euclidean_distance=distance,
+            )
+    return best_match
+
+
+def analyze_video_alerts(
+    video_path: str,
+    camera_id: str,
+    target_encoding: np.ndarray,
+    alerts_list: list,
+    *,
+    profile: str,
+    progress: dict[str, Any] | None = None,
+    progress_lock: threading.Lock | None = None,
+) -> None:
+    profile_config = get_profile_config(profile)
+    match_threshold = float(profile_config["match_threshold"])
+    yolo_confidence = float(profile_config["yolo_confidence"])
+    base_stride = max(1, int(profile_config["base_stride"]))
+    confirm_frames = max(1, int(profile_config["confirm_frames"]))
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    adaptive_stride = max(base_stride, HIGH_FPS_STRIDE if fps >= HIGH_FPS_THRESHOLD else base_stride)
+
+    match_active = False
+    match_streak = 0
+    non_match_streak = 0
+    frame_index = 0
+
+    segments = _build_segments(total_frames, fps)
+
+    try:
+        for start_frame, end_frame in segments:
+            if start_frame > 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+            local_index = start_frame
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+
+                frame_index += 1
+                local_index += 1
+                if end_frame >= 0 and local_index > end_frame:
+                    break
+
+                if frame.shape[1] > MAX_FRAME_WIDTH:
+                    scale = MAX_FRAME_WIDTH / frame.shape[1]
+                    frame = cv2.resize(frame, (MAX_FRAME_WIDTH, int(frame.shape[0] * scale)))
+
+                should_run_detection = True
+                if not match_active and adaptive_stride > 1:
+                    should_run_detection = ((frame_index - 1) % adaptive_stride) == 0
+
+                best_match: FaceMatch | None = None
+                if should_run_detection:
+                    candidates = _detect_candidates(frame, yolo_confidence=yolo_confidence)
+                    best_match = _best_match_from_candidates(candidates, target_encoding)
+
+                is_match = bool(best_match and best_match.similarity >= match_threshold)
+                if is_match and best_match is not None:
+                    match_streak += 1
+                    non_match_streak = 0
+                    if (not match_active) and match_streak >= confirm_frames:
+                        match_active = True
+                        event_time = datetime.now()
+                        video_timestamp = str(timedelta(seconds=int(frame_index / fps)))
+                        _append_match_alert(
+                            alerts_list,
+                            camera_id=camera_id,
+                            score=best_match.similarity,
+                            euclidean_dist=best_match.euclidean_distance,
+                            event_time=event_time,
+                            video_timestamp=video_timestamp,
+                            frame=frame,
+                        )
+                else:
+                    match_streak = 0
+                    non_match_streak += 1
+                    if non_match_streak >= MATCH_RESET_FRAMES:
+                        match_active = False
+
+                if progress is not None:
+                    if progress_lock is not None:
+                        with progress_lock:
+                            progress["processed_frames"] = min(
+                                int(progress.get("processed_frames", 0)) + 1,
+                                int(progress.get("total_frames", 1)),
+                            )
+                            progress["current_camera"] = camera_id
+                    else:
+                        progress["processed_frames"] = min(
+                            int(progress.get("processed_frames", 0)) + 1,
+                            int(progress.get("total_frames", 1)),
+                        )
+                        progress["current_camera"] = camera_id
+    finally:
+        cap.release()
+
+
+def yield_raw_video_frames(video_path: str):
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise Exception(f"Cannot open video {video_path}")
+
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+
+            if frame.shape[1] > MAX_FRAME_WIDTH:
+                scale = MAX_FRAME_WIDTH / frame.shape[1]
+                frame = cv2.resize(frame, (MAX_FRAME_WIDTH, int(frame.shape[0] * scale)))
+
+            ret, buffer = cv2.imencode(".jpg", frame)
+            if not ret:
+                continue
+
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n"
+            )
+    finally:
+        cap.release()
+
+
 def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndarray, alerts_list: list):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -226,7 +460,9 @@ def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndar
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_index = 0
     match_active = False
+    match_streak = 0
     non_match_streak = 0
+    adaptive_stride = HIGH_FPS_STRIDE if fps >= HIGH_FPS_THRESHOLD else BASE_FRAME_STRIDE
 
     try:
         while True:
@@ -236,42 +472,49 @@ def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndar
 
             frame_index += 1
 
+            # Skip heavy face inference for some frames to improve throughput.
+            # When a possible match is active, process every frame to preserve accuracy.
+            should_run_detection = True
+            if not match_active and adaptive_stride > 1:
+                should_run_detection = ((frame_index - 1) % adaptive_stride) == 0
+
             if frame.shape[1] > MAX_FRAME_WIDTH:
                 scale = MAX_FRAME_WIDTH / frame.shape[1]
                 frame = cv2.resize(frame, (MAX_FRAME_WIDTH, int(frame.shape[0] * scale)))
 
-            detections = get_yolo_model().predict(
-                frame,
-                classes=[PERSON_CLASS_ID],
-                conf=YOLO_CONFIDENCE,
-                imgsz=YOLO_IMAGE_SIZE,
-                device=YOLO_DEVICE,
-                half=YOLO_HALF,
-                verbose=False,
-            )
-
             candidates: list[tuple[float, tuple[int, int, int, int], np.ndarray]] = []
-            for result in detections:
-                for box in result.boxes:
-                    class_id = int(box.cls[0])
-                    if class_id != PERSON_CLASS_ID:
-                        continue
+            if should_run_detection:
+                detections = get_yolo_model().predict(
+                    frame,
+                    classes=[PERSON_CLASS_ID],
+                    conf=YOLO_CONFIDENCE,
+                    imgsz=YOLO_IMAGE_SIZE,
+                    device=YOLO_DEVICE,
+                    half=YOLO_HALF,
+                    verbose=False,
+                )
 
-                    confidence = float(box.conf[0])
-                    if confidence < YOLO_CONFIDENCE:
-                        continue
+                for result in detections:
+                    for box in result.boxes:
+                        class_id = int(box.cls[0])
+                        if class_id != PERSON_CLASS_ID:
+                            continue
 
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    crop = _expand_crop(frame, x1, y1, x2, y2)
-                    if crop.size == 0:
-                        continue
+                        confidence = float(box.conf[0])
+                        if confidence < YOLO_CONFIDENCE:
+                            continue
 
-                    try:
-                        embedding = _extract_embedding(crop, enforce_detection=False)
-                    except Exception:
-                        continue
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        crop = _expand_crop(frame, x1, y1, x2, y2)
+                        if crop.size == 0:
+                            continue
 
-                    candidates.append((confidence, (x1, y1, x2, y2), embedding))
+                        try:
+                            embedding = _extract_embedding(crop, enforce_detection=False)
+                        except Exception:
+                            continue
+
+                        candidates.append((confidence, (x1, y1, x2, y2), embedding))
 
             candidates.sort(key=lambda item: item[0], reverse=True)
             best_match: FaceMatch | None = None
@@ -303,8 +546,9 @@ def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndar
             is_match = bool(best_match and best_match.similarity >= MATCH_THRESHOLD)
 
             if is_match and best_match is not None:
+                match_streak += 1
                 non_match_streak = 0
-                if not match_active:
+                if not match_active and match_streak >= MATCH_CONFIRM_FRAMES:
                     match_active = True
                     event_time = datetime.now()
                     video_timestamp = str(timedelta(seconds=int(frame_index / fps)))
@@ -318,6 +562,7 @@ def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndar
                         frame=frame,
                     )
             else:
+                match_streak = 0
                 non_match_streak += 1
                 if non_match_streak >= MATCH_RESET_FRAMES:
                     match_active = False

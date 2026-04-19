@@ -15,6 +15,7 @@ type AlertItem = {
 type SystemStatus = "booting" | "online" | "offline";
 
 type WorkflowStep = 0 | 1 | 2 | 3;
+type AnalysisProfile = "fast" | "balanced" | "accurate";
 
 type WorkflowState = {
   step: WorkflowStep;
@@ -48,6 +49,10 @@ type WorkflowState = {
   readyToRun: boolean;
   uploadCount: number;
   progress: number;
+  backendProgress: number;
+  jobState: string;
+  analysisProfile: AnalysisProfile;
+  setAnalysisProfile: (profile: AnalysisProfile) => void;
   missingPreview: string | null;
   cam1Preview: string | null;
   cam2Preview: string | null;
@@ -104,6 +109,11 @@ function formatPercent(value: number) {
   return `${Math.round(value * 1000) / 10}%`;
 }
 
+function formatDecimal(value?: number) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "--";
+  return value.toFixed(4);
+}
+
 function getWorkflowProgress(
   step: WorkflowStep,
   status: SystemStatus,
@@ -122,6 +132,11 @@ function getWorkflowProgress(
   return 90;
 }
 
+function normalizeProfile(value: string | null | undefined): AnalysisProfile {
+  if (value === "fast" || value === "accurate") return value;
+  return "balanced";
+}
+
 export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [step, setStep] = useState<WorkflowStep>(0);
   const [missingImage, setMissingImage] = useState<File | null>(null);
@@ -137,6 +152,9 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SystemStatus>("booting");
   const [lastChecked, setLastChecked] = useState<string>("");
   const [uploadKey, setUploadKey] = useState(0);
+  const [analysisProfile, setAnalysisProfile] = useState<AnalysisProfile>("balanced");
+  const [backendProgress, setBackendProgress] = useState(0);
+  const [jobState, setJobState] = useState<string>("idle");
 
   const missingPreview = useObjectUrl(missingImage);
   const cam1Preview = useObjectUrl(cam1);
@@ -144,7 +162,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
   const readyToRun = Boolean(missingImage && cam1 && cam2 && !loading);
   const uploadCount = [missingImage, cam1, cam2].filter(Boolean).length;
-  const progress = getWorkflowProgress(step, status, loading, sessionId, alerts.length, uploadCount);
+  const fallbackProgress = getWorkflowProgress(step, status, loading, sessionId, alerts.length, uploadCount);
+  const progress = sessionId ? Math.max(backendProgress, fallbackProgress) : fallbackProgress;
 
   useEffect(() => {
     let mounted = true;
@@ -184,12 +203,30 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!sessionId) return;
 
+    const pollProgress = async () => {
+      try {
+        const response = await fetchWithTimeout(`${BACKEND_URL}/api/progress/${sessionId}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        setBackendProgress(Number(data.progress_percent ?? 0));
+        setJobState(String(data.state ?? "running"));
+      } catch {
+        // Keep previous progress value on transient fetch errors.
+      }
+    };
+
+    pollProgress();
+    const progressInterval = window.setInterval(pollProgress, 1000);
+
     const pollAlerts = async () => {
       try {
         const response = await fetchWithTimeout(`${BACKEND_URL}/api/alerts/${sessionId}`);
         if (response.ok) {
           const data = await response.json();
           setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
+          if (typeof data.profile === "string") {
+            setAnalysisProfile(normalizeProfile(data.profile));
+          }
           setBackendError(null);
           setStatus("online");
         } else {
@@ -203,7 +240,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
     pollAlerts();
     const interval = window.setInterval(pollAlerts, 1000);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      window.clearInterval(progressInterval);
+    };
   }, [sessionId]);
 
   const resetSession = () => {
@@ -212,6 +252,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setError(null);
     setBackendError(null);
     setResetInfo(null);
+    setBackendProgress(0);
+    setJobState("idle");
   };
 
   const handleResetPlatform = async () => {
@@ -239,6 +281,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       setCam2(null);
       setUploadKey((value) => value + 1);
       setStep(0);
+      setBackendProgress(0);
+      setJobState("idle");
       setResetInfo("Platform reset completed. Temporary files were cleaned and session state was cleared.");
       setStatus("online");
     } catch (resetError) {
@@ -263,6 +307,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     formData.append("missing_image", missingImage);
     formData.append("cam1_video", cam1);
     formData.append("cam2_video", cam2);
+    formData.append("profile", analysisProfile);
 
     try {
       const response = await fetch(`${BACKEND_URL}/api/analyze`, {
@@ -277,6 +322,9 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
       const data = await response.json();
       setSessionId(data.session_id);
+      setBackendProgress(0);
+      setJobState(String(data.job_state ?? "pending"));
+      setAnalysisProfile(normalizeProfile(data.profile));
       setBackendError(null);
       setStatus("online");
       setStep(3);
@@ -289,6 +337,13 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   };
 
   const handleExportEvidence = async () => {
+    if (!alerts.length) {
+      setError("No alerts are available to export.");
+      return;
+    }
+
+    setError(null);
+
     const snapshotEntries = await Promise.all(
       alerts.map(async (alert) => {
         if (!sessionId || !alert.snapshot) {
@@ -312,19 +367,143 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       }),
     );
 
-    const html = buildEvidenceReport({
-      sessionId,
-      alerts: snapshotEntries,
-      backendUrl: BACKEND_URL,
+    const { jsPDF } = await import("jspdf");
+    const document = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+      compress: true,
     });
 
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `surveillance_evidence_${sessionId?.slice(0, 8) ?? "session"}.html`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const margin = 14;
+    const contentWidth = pageWidth - margin * 2;
+    const lineHeight = 6;
+
+    const drawHeader = () => {
+      document.setFillColor(20, 20, 20);
+      document.rect(0, 0, pageWidth, 12, "F");
+      document.setTextColor(255, 255, 255);
+      document.setFont("helvetica", "bold");
+      document.setFontSize(10);
+      document.text("SURVEILLANCE EVIDENCE REPORT", margin, 8);
+      document.setFont("helvetica", "normal");
+      document.text("Prepared by Ayush Kathil", pageWidth - margin - 52, 8);
+      document.setTextColor(0, 0, 0);
+    };
+
+    const drawFooter = () => {
+      const page = document.getCurrentPageInfo().pageNumber;
+      document.setDrawColor(120, 120, 120);
+      document.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
+      document.setFont("helvetica", "normal");
+      document.setFontSize(9);
+      document.text(`Generated: ${new Date().toLocaleString()}`, margin, pageHeight - 7);
+      document.text(`Page ${page}`, pageWidth - margin - 12, pageHeight - 7);
+    };
+
+    const safeWrite = (text: string, x: number, y: number, maxWidth = contentWidth) => {
+      const lines = document.splitTextToSize(text, maxWidth);
+      document.text(lines, x, y);
+      return y + lines.length * lineHeight;
+    };
+
+    const ensureSpace = (cursorY: number, requiredHeight: number) => {
+      if (cursorY + requiredHeight <= pageHeight - margin) {
+        return cursorY;
+      }
+      drawFooter();
+      document.addPage();
+      drawHeader();
+      return margin + 4;
+    };
+
+    drawHeader();
+    let y = margin + 6;
+    document.setFont("helvetica", "bold");
+    document.setFontSize(19);
+    y = safeWrite("Surveillance Evidence Report", margin, y, contentWidth) + 2;
+
+    document.setFont("helvetica", "normal");
+    document.setFontSize(10);
+    y = safeWrite(`Session ID: ${sessionId ?? "N/A"}`, margin, y) + 1;
+    y = safeWrite(`Backend URL: ${BACKEND_URL}`, margin, y) + 1;
+    y = safeWrite(`Generated At: ${new Date().toLocaleString()}`, margin, y) + 1;
+    y = safeWrite(`Total Alerts: ${snapshotEntries.length}`, margin, y) + 1;
+
+    const avgScore = snapshotEntries.reduce((acc, item) => acc + item.score, 0) / snapshotEntries.length;
+    y = safeWrite(`Average Similarity Score: ${formatPercent(avgScore)}`, margin, y) + 5;
+
+    document.setFont("helvetica", "bold");
+    document.setFontSize(12);
+    y = safeWrite("Alert Details", margin, y) + 2;
+
+    for (let index = 0; index < snapshotEntries.length; index += 1) {
+      const alert = snapshotEntries[index];
+      y = ensureSpace(y, 74);
+
+      document.setDrawColor(20, 20, 20);
+      document.setLineWidth(0.2);
+      document.roundedRect(margin, y, contentWidth, 52, 2, 2);
+
+      document.setFont("helvetica", "bold");
+      document.setFontSize(11);
+      document.text(`Alert ${index + 1}`, margin + 3, y + 7);
+
+      document.setFont("helvetica", "normal");
+      document.setFontSize(10);
+      document.text(`Camera: ${alert.camera}`, margin + 3, y + 14);
+      document.text(`Timestamp: ${alert.timestamp}`, margin + 3, y + 20);
+      document.text(`Video Time: ${formatTime(alert.video_timestamp)}`, margin + 3, y + 26);
+      document.text(`Similarity Score: ${formatPercent(alert.score)}`, margin + 3, y + 32);
+      document.text(`Euclidean Distance: ${formatDecimal(alert.euclidean_distance)}`, margin + 3, y + 38);
+      document.text(`Snapshot: ${alert.snapshot ?? "--"}`, margin + 3, y + 44);
+
+      const imageX = margin + contentWidth - 58;
+      const imageY = y + 4;
+      const imageW = 54;
+      const imageH = 44;
+
+      if (alert.snapshotDataUrl) {
+        try {
+          document.addImage(alert.snapshotDataUrl, "JPEG", imageX, imageY, imageW, imageH, undefined, "FAST");
+        } catch {
+          document.setFont("helvetica", "normal");
+          document.setFontSize(9);
+          document.text("Snapshot unavailable", imageX + 4, imageY + imageH / 2);
+        }
+      } else {
+        document.setFont("helvetica", "normal");
+        document.setFontSize(9);
+        document.text("Snapshot unavailable", imageX + 4, imageY + imageH / 2);
+      }
+
+      y += 58;
+    }
+
+    y = ensureSpace(y, 34);
+    document.setFont("helvetica", "bold");
+    document.setFontSize(11);
+    document.text("Investigator Signature", margin, y + 6);
+    document.setFont("helvetica", "normal");
+    document.setFontSize(10);
+    document.line(margin, y + 16, margin + 80, y + 16);
+    document.text("Name / Signature", margin, y + 21);
+    document.line(margin + 95, y + 16, pageWidth - margin, y + 16);
+    document.text("Date", margin + 95, y + 21);
+
+    drawFooter();
+
+    document.setProperties({
+      title: "Surveillance Evidence Report",
+      subject: "Missing Person Detection Export",
+      creator: "Surveillance System Frontend",
+      author: "Ayush Kathil",
+      keywords: "surveillance,evidence,alerts,facial-match",
+    });
+
+    document.save(`surveillance_evidence_${sessionId?.slice(0, 8) ?? "session"}.pdf`);
   };
 
   const streamUrl = (camera: "CAM-1" | "CAM-2") => `${BACKEND_URL}/api/stream/${sessionId}/${camera}`;
@@ -361,6 +540,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     readyToRun,
     uploadCount,
     progress,
+    backendProgress,
+    jobState,
+    analysisProfile,
+    setAnalysisProfile,
     missingPreview,
     cam1Preview,
     cam2Preview,
@@ -390,78 +573,6 @@ async function blobToDataUrl(blob: Blob) {
     reader.onerror = () => reject(new Error("Failed to read snapshot image."));
     reader.readAsDataURL(blob);
   });
-}
-
-function buildEvidenceReport({
-  sessionId,
-  alerts,
-  backendUrl,
-}: {
-  sessionId: string | null;
-  alerts: Array<AlertItem & { snapshotDataUrl: string | null }>;
-  backendUrl: string;
-}) {
-  const rows = alerts
-    .map(
-      (alert) => `
-        <article class="card">
-          <div class="card-meta">
-            <span>${alert.camera}</span>
-            <span>${alert.timestamp}</span>
-            <span>${formatTime(alert.video_timestamp)}</span>
-            <span>${formatPercent(alert.score)}</span>
-          </div>
-          <div class="card-body">
-            <div>
-              <h2>Detected snapshot</h2>
-              <p>Snapshot file: ${alert.snapshot ?? "--"}</p>
-              <p>Euclidean distance: ${alert.euclidean_distance?.toFixed(3) ?? "--"}</p>
-            </div>
-            ${alert.snapshotDataUrl ? `<img src="${alert.snapshotDataUrl}" alt="${alert.camera} snapshot" />` : `<div class="placeholder">Snapshot unavailable</div>`}
-          </div>
-        </article>
-      `,
-    )
-    .join("");
-
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Surveillance Evidence Report</title>
-  <style>
-    :root { color-scheme: light; }
-    body { margin: 0; font-family: Inter, Arial, sans-serif; background: #fff; color: #000; }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 32px; }
-    .hero { border: 1px solid rgba(0,0,0,.12); border-radius: 28px; padding: 28px; background: linear-gradient(180deg, #fff, #f7f7f7); }
-    .hero h1 { margin: 0 0 10px; font-size: 34px; }
-    .hero p, .meta { color: rgba(0,0,0,.68); line-height: 1.7; }
-    .grid { display: grid; gap: 18px; margin-top: 22px; }
-    .card { border: 1px solid rgba(0,0,0,.1); border-radius: 24px; overflow: hidden; background: #fff; box-shadow: 0 18px 40px rgba(0,0,0,.06); }
-    .card-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 16px 18px; background: rgba(0,0,0,.03); font-size: 12px; text-transform: uppercase; letter-spacing: .14em; }
-    .card-body { display: grid; grid-template-columns: 1.1fr .9fr; gap: 18px; padding: 18px; align-items: center; }
-    .card-body h2 { margin: 0 0 8px; font-size: 22px; }
-    .card-body p { margin: 0 0 8px; color: rgba(0,0,0,.66); }
-    .card-body img, .placeholder { width: 100%; min-height: 260px; border-radius: 20px; object-fit: cover; background: linear-gradient(135deg, rgba(0,0,0,.05), rgba(0,0,0,.02)); border: 1px solid rgba(0,0,0,.08); }
-    .placeholder { display: grid; place-items: center; color: rgba(0,0,0,.45); }
-    @media (max-width: 760px) { .card-meta, .card-body { grid-template-columns: 1fr; } }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <section class="hero">
-      <h1>Surveillance Evidence Report</h1>
-      <p>Session: ${sessionId ?? "N/A"}</p>
-      <p>Backend: ${backendUrl}</p>
-      <p>This report includes the detected snapshot for each alert and preserves the time, camera number, confidence score, and source file name.</p>
-    </section>
-    <div class="grid">
-      ${rows || `<article class="card"><div class="card-body"><div><h2>No alerts captured</h2><p>No detection matches were present for this session.</p></div></div></article>`}
-    </div>
-  </div>
-</body>
-</html>`;
 }
 
 export function useWorkflowState() {
