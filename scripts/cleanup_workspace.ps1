@@ -109,8 +109,7 @@ foreach ($legacy in $legacyFolders) {
 
 $searchRoots = @(
     (Join-Path $root 'backend'),
-    (Join-Path $root 'frontend'),
-    (Join-Path $root 'missing_person_project')
+    (Join-Path $root 'frontend')
 ) | Where-Object { Test-Path -LiteralPath $_ }
 
 foreach ($searchRoot in $searchRoots) {
@@ -138,7 +137,7 @@ foreach ($generated in $generatedFiles) {
 
 Write-Host ""
 Write-Host "Cleanup complete."
-Write-Host "Active project: missing_person_project"
+Write-Host "Active project: backend + frontend surveillance stack"
 if ($SkipLegacyArchive) {
     Write-Host "Legacy archive step: skipped"
 } else {

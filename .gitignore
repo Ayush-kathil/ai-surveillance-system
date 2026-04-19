@@ -15,7 +15,6 @@ __pycache__/
 node_modules/
 _archive/
 backend/output/
-missing_person_project/output/
 output/
 *.log
 *.sqlite3

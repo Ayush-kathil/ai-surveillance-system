@@ -189,7 +189,6 @@ run_full_project.ps1       Full clean + launch flow
 setup_system.ps1           One-time setup script
 start_app.ps1              Standard start script
 _archive/                  Archived legacy material
-missing_person_project/    Historical project assets/docs
 ```
 
 ## Professional Reporting Output
