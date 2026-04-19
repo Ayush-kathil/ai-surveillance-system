@@ -88,6 +88,7 @@ class MatchAlert:
     score: float
     euclidean_distance: float
     snapshot: str
+    bounding_box: Tuple[int, int, int, int] | None
 
 
 _yolo_model: YOLO | None = None
@@ -235,10 +236,28 @@ def _expand_crop(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> np.nd
     return frame[top:bottom, left:right]
 
 
-def _save_match_snapshot(frame: np.ndarray, camera_id: str, timestamp: datetime) -> Path:
+def _save_match_snapshot(
+    frame: np.ndarray,
+    camera_id: str,
+    timestamp: datetime,
+    location: tuple[int, int, int, int] | None = None,
+) -> Path:
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     snapshot_path = SNAPSHOT_DIR / f"{camera_id}_{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-    cv2.imwrite(str(snapshot_path), frame)
+
+    marked_frame = frame.copy()
+    if location is not None:
+        x1, y1, x2, y2 = location
+        x1 = max(0, min(int(x1), marked_frame.shape[1] - 1))
+        y1 = max(0, min(int(y1), marked_frame.shape[0] - 1))
+        x2 = max(0, min(int(x2), marked_frame.shape[1] - 1))
+        y2 = max(0, min(int(y2), marked_frame.shape[0] - 1))
+        cv2.rectangle(marked_frame, (x1, y1), (x2, y2), (0, 255, 255), 4)
+        label_y = max(18, y1 - 10)
+        cv2.rectangle(marked_frame, (x1, max(0, y1 - 24)), (min(marked_frame.shape[1] - 1, x1 + 160), y1), (0, 255, 255), -1)
+        cv2.putText(marked_frame, "DETECTED PERSON", (x1 + 6, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2, cv2.LINE_AA)
+
+    cv2.imwrite(str(snapshot_path), marked_frame)
     return snapshot_path
 
 
@@ -251,8 +270,9 @@ def _append_match_alert(
     event_time: datetime,
     video_timestamp: str,
     frame: np.ndarray,
+    location: tuple[int, int, int, int] | None = None,
 ) -> None:
-    snapshot_path = _save_match_snapshot(frame, camera_id, event_time)
+    snapshot_path = _save_match_snapshot(frame, camera_id, event_time, location)
     alert = MatchAlert(
         camera=camera_id,
         timestamp=event_time.isoformat(sep=" ", timespec="seconds"),
@@ -260,6 +280,7 @@ def _append_match_alert(
         score=round(score, 4),
         euclidean_distance=round(euclidean_dist, 4),
         snapshot=snapshot_path.name,
+        bounding_box=location,
     )
     alerts_list.append(alert.__dict__)
 
@@ -400,6 +421,7 @@ def analyze_video_alerts(
                             event_time=event_time,
                             video_timestamp=video_timestamp,
                             frame=frame,
+                            location=best_match.location,
                         )
                 else:
                     match_streak = 0
@@ -560,6 +582,7 @@ def yield_video_frames(video_path: str, camera_id: str, target_encoding: np.ndar
                         event_time=event_time,
                         video_timestamp=video_timestamp,
                         frame=frame,
+                        location=best_match.location,
                     )
             else:
                 match_streak = 0

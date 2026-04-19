@@ -10,6 +10,7 @@ type AlertItem = {
   score: number;
   euclidean_distance?: number;
   snapshot?: string;
+  bounding_box?: [number, number, number, number] | null;
 };
 
 type SystemStatus = "booting" | "online" | "offline";
@@ -345,6 +346,11 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     }
 
     setError(null);
+    const firstAlertTimestamp = alerts.length > 0 ? alerts[0]?.timestamp ?? "--" : null;
+
+    const logoDataUrl = await fetch("/logo.png")
+      .then(async (response) => (response.ok ? blobToDataUrl(await response.blob()) : null))
+      .catch(() => null);
 
     const snapshotEntries = await Promise.all(
       alerts.map(async (alert) => {
@@ -382,14 +388,31 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     const margin = 14;
     const contentWidth = pageWidth - margin * 2;
     const lineHeight = 6;
+    const sectionGap = 4;
+
+    const formatBoundingBox = (value?: [number, number, number, number] | null) => {
+      if (!value) return "Not recorded";
+      return `${value[0]}, ${value[1]}, ${value[2]}, ${value[3]}`;
+    };
 
     const drawHeader = () => {
       document.setFillColor(20, 20, 20);
       document.rect(0, 0, pageWidth, 12, "F");
+      if (logoDataUrl) {
+        try {
+          document.setFillColor(255, 255, 255);
+          document.circle(margin + 4.5, 6, 4.3, "F");
+          document.setDrawColor(255, 255, 255);
+          document.circle(margin + 4.5, 6, 4.3, "S");
+          document.addImage(logoDataUrl, "PNG", margin + 0.65, 2.15, 7.7, 7.7, undefined, "FAST");
+        } catch {
+          // Ignore image decode issues and continue with text header.
+        }
+      }
       document.setTextColor(255, 255, 255);
       document.setFont("helvetica", "bold");
       document.setFontSize(10);
-      document.text("SURVEILLANCE EVIDENCE REPORT", margin, 8);
+      document.text("SURVEILLANCE EVIDENCE REPORT", margin + 12, 8);
       document.setFont("helvetica", "normal");
       document.text("Prepared by Ayush Kathil", pageWidth - margin - 52, 8);
       document.setTextColor(0, 0, 0);
@@ -427,6 +450,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     document.setFontSize(19);
     y = safeWrite("Surveillance Evidence Report", margin, y, contentWidth) + 2;
 
+    document.setFontSize(11);
+    document.setFont("helvetica", "normal");
+    y = safeWrite("University Project Submission", margin, y) + 1;
+
     document.setFont("helvetica", "normal");
     document.setFontSize(10);
     y = safeWrite(`Session ID: ${sessionId ?? "N/A"}`, margin, y) + 1;
@@ -439,7 +466,40 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
     document.setFont("helvetica", "bold");
     document.setFontSize(12);
-    y = safeWrite("Alert Details", margin, y) + 2;
+    y = safeWrite("Report Sections", margin, y) + 1;
+    document.setFont("helvetica", "normal");
+    document.setFontSize(10);
+    y = safeWrite("1. Project Overview", margin, y) + 1;
+    y = safeWrite("2. Detection Methodology", margin, y) + 1;
+    y = safeWrite("3. Session Summary and Metrics", margin, y) + 1;
+    y = safeWrite("4. Marked Evidence Timeline", margin, y) + 1;
+    y = safeWrite("5. Conclusion and Signature", margin, y) + sectionGap;
+
+    document.setFont("helvetica", "bold");
+    document.setFontSize(12);
+    y = safeWrite("Project Overview", margin, y) + 1;
+    document.setFont("helvetica", "normal");
+    y = safeWrite("This project provides a missing-person surveillance workflow with a reference photo, dual camera feeds, real-time detection, and exportable evidence. Detected subjects are marked inside the alert snapshots so the report shows where the person was found in the frame.", margin, y) + sectionGap;
+
+    document.setFont("helvetica", "bold");
+    document.setFontSize(12);
+    y = safeWrite("Detection Methodology", margin, y) + 1;
+    document.setFont("helvetica", "normal");
+    y = safeWrite("The backend combines YOLO person detection with facial embedding comparison. Each positive match records the camera, timestamp, similarity score, Euclidean distance, and a marked snapshot with a visible bounding box.", margin, y) + sectionGap;
+
+    document.setFont("helvetica", "bold");
+    document.setFontSize(12);
+    y = safeWrite("Session Summary and Metrics", margin, y) + 1;
+    document.setFont("helvetica", "normal");
+    y = safeWrite(`Current analysis profile: ${analysisProfile}.`, margin, y) + 1;
+    y = safeWrite(`Backend job state: ${jobState}.`, margin, y) + 1;
+    y = safeWrite(`Backend progress: ${backendProgress}%.`, margin, y) + 1;
+    y = safeWrite(`Active alerts: ${alerts.length}.`, margin, y) + 1;
+    y = safeWrite(`First alert timestamp: ${firstAlertTimestamp ?? "--"}.`, margin, y) + sectionGap;
+
+    document.setFont("helvetica", "bold");
+    document.setFontSize(12);
+    y = safeWrite("Marked Evidence Timeline", margin, y) + 2;
 
     for (let index = 0; index < snapshotEntries.length; index += 1) {
       const alert = snapshotEntries[index];
@@ -461,6 +521,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       document.text(`Similarity Score: ${formatPercent(alert.score)}`, margin + 3, y + 32);
       document.text(`Euclidean Distance: ${formatDecimal(alert.euclidean_distance)}`, margin + 3, y + 38);
       document.text(`Snapshot: ${alert.snapshot ?? "--"}`, margin + 3, y + 44);
+      document.text(`Marked Block: ${formatBoundingBox(alert.bounding_box)}`, margin + 3, y + 50);
 
       const imageX = margin + contentWidth - 58;
       const imageY = y + 4;
@@ -481,8 +542,15 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
         document.text("Snapshot unavailable", imageX + 4, imageY + imageH / 2);
       }
 
-      y += 58;
+      y += 64;
     }
+
+    y = ensureSpace(y, 28);
+    document.setFont("helvetica", "bold");
+    document.setFontSize(12);
+    y = safeWrite("Conclusion", margin, y) + 1;
+    document.setFont("helvetica", "normal");
+    y = safeWrite("The exported evidence shows the detections with marked person blocks, enabling direct review by instructors or investigators. The report is structured for university submission and preserves the essential session metadata needed for validation.", margin, y) + sectionGap;
 
     y = ensureSpace(y, 34);
     document.setFont("helvetica", "bold");

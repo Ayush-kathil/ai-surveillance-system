@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandMark } from "./brand-mark";
 
 export default function Home() {
   return (
@@ -9,8 +10,9 @@ export default function Home() {
 
       <div className="relative mx-auto grid min-h-screen w-full max-w-7xl place-items-center px-6 py-10 sm:px-10 lg:px-12">
         <section className="reveal space-y-8 text-center">
-          <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-black/15 bg-white/80 px-5 py-2 text-[11px] font-semibold uppercase tracking-[0.32em] text-black shadow-[0_12px_30px_rgba(0,0,0,0.08)] backdrop-blur-sm">
-            Smart Surveillance Platform
+          <div className="mx-auto inline-flex items-center gap-3 rounded-full border border-black/15 bg-white/80 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.32em] text-black shadow-[0_12px_30px_rgba(0,0,0,0.08)] backdrop-blur-sm">
+            <BrandMark compact showLabel={false} />
+            <span>Smart Surveillance Platform</span>
           </div>
 
           <h1 className="mx-auto max-w-5xl text-balance text-5xl font-extrabold tracking-[-0.03em] sm:text-6xl lg:text-7xl">

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BackArrow } from "../back-arrow";
+import { BrandMark } from "../brand-mark";
 import { useWorkflow } from "../workflow-provider";
 
 export default function VideosPage() {
@@ -71,8 +72,9 @@ export default function VideosPage() {
           <div className="flex items-center gap-3">
             <BackArrow fallbackHref="/photo" />
             <div>
-            <p className="text-[11px] uppercase tracking-[0.28em] text-black/50">Step 2</p>
-            <h1 className="mt-1 text-xl font-extrabold tracking-tight sm:text-2xl">Camera Upload and Preview Grid</h1>
+              <BrandMark compact />
+              <p className="mt-2 text-[11px] uppercase tracking-[0.28em] text-black/50">Step 2</p>
+              <h1 className="mt-1 text-xl font-extrabold tracking-tight sm:text-2xl">Camera Upload and Preview Grid</h1>
             </div>
           </div>
           <div className="rounded-full border border-black/15 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black/70">

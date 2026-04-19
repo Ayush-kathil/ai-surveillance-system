@@ -17,6 +17,10 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Surveillance System",
   description: "A monochrome missing-person surveillance console with guided uploads, live streams, alerts, and evidence export.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

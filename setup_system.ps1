@@ -13,7 +13,7 @@ pip install --upgrade pip
 pip install -r backend/requirements.txt
 
 Write-Host "--- 2. Pre-downloading AI Models (This makes the first run fast) ---"
-python -c "from ultralytics import YOLO; YOLO('backend/yolov8n.pt'); from deepface import DeepFace; DeepFace.build_model('ArcFace')"
+python -c "from ultralytics import YOLO; YOLO('yolov8n.pt'); from deepface import DeepFace; DeepFace.build_model('ArcFace')"
 
 Write-Host "--- 3. Setting up Frontend Dependencies ---"
 cd frontend
