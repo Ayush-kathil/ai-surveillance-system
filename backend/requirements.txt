@@ -9,3 +9,5 @@ ultralytics
 deepface
 tensorflow
 tf-keras
+celery
+redis

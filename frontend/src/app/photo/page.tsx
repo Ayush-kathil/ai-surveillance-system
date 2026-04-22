@@ -9,38 +9,13 @@ import { useWorkflow } from "../workflow-provider";
 
 export default function PhotoPage() {
   const router = useRouter();
-  const { missingImage, setMissingImage, missingPreview, setStep, uploadKey } = useWorkflow();
+  const { missingImage, setMissingImage, missingPreview, setStep, uploadKey, uploadProgress, loading } = useWorkflow();
   const [dragActive, setDragActive] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [previewReady, setPreviewReady] = useState(false);
 
   useEffect(() => {
     setPreviewReady(false);
   }, [missingPreview]);
-
-  useEffect(() => {
-    if (!missingImage) {
-      setUploadProgress(0);
-      return;
-    }
-
-    setUploadProgress(0);
-    const durationMs = Math.min(1800, Math.max(700, Math.round((missingImage.size / (1024 * 1024)) * 450)));
-    const startedAt = performance.now();
-    let frameId = 0;
-
-    const step = (now: number) => {
-      const progress = Math.min(1, (now - startedAt) / durationMs);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setUploadProgress(Math.round(eased * 100));
-      if (progress < 1) {
-        frameId = window.requestAnimationFrame(step);
-      }
-    };
-
-    frameId = window.requestAnimationFrame(step);
-    return () => window.cancelAnimationFrame(frameId);
-  }, [missingImage]);
 
   const handleDrop = (event: React.DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
@@ -112,11 +87,14 @@ export default function PhotoPage() {
                   <div className="mt-3 space-y-2">
                     <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.16em] text-black/55">
                       <span>Staging</span>
-                      <span>{uploadProgress}%</span>
+                      <span>{uploadProgress.missingImage}%</span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-full border border-black/10 bg-white">
-                      <div className="photo-progress h-full rounded-full bg-[linear-gradient(90deg,#111_0%,#333_35%,#0f0f0f_100%)] transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                      <div className="photo-progress h-full rounded-full bg-[linear-gradient(90deg,#111_0%,#333_35%,#0f0f0f_100%)] transition-all duration-300" style={{ width: `${uploadProgress.missingImage}%` }} />
                     </div>
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-black/45">
+                      {loading ? "Uploading bytes to backend" : "Upload starts when analysis begins"}
+                    </p>
                   </div>
                 )}
               </label>

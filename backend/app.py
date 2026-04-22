@@ -1,14 +1,17 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import shutil
 import tempfile
 import subprocess
-import threading
+import asyncio
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from pydantic import BaseModel
-from engine import load_encoding_from_image, warm_up_models, analyze_video_alerts, yield_raw_video_frames
+from celery.result import AsyncResult
+from engine import load_encoding_from_image, warm_up_models, yield_raw_video_frames
+from tasks import analyze_surveillance_task, celery_app
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -36,69 +39,91 @@ app.add_middleware(
 
 import uuid
 from fastapi.responses import FileResponse, StreamingResponse
-import asyncio
 
 app.state.sessions = {}
-app.state.session_tasks = {}
+SHARED_SESSIONS_DIR = Path(os.getenv("SHARED_SESSIONS_DIR", ""))
 
 
-async def _run_session_analysis(session_id: str):
+def _build_session_workdir(session_id: str) -> Path:
+    if SHARED_SESSIONS_DIR:
+        session_root = SHARED_SESSIONS_DIR / session_id
+        session_root.mkdir(parents=True, exist_ok=True)
+        return session_root
+    return Path(tempfile.mkdtemp(prefix=f"session_{session_id}_"))
+
+
+def _session_task(session_id: str) -> AsyncResult | None:
     session = app.state.sessions.get(session_id)
     if not session:
-        return
+        return None
+    task_id = session.get("task_id")
+    if not task_id:
+        return None
+    return AsyncResult(task_id, app=celery_app)
 
-    try:
-        session["job"]["state"] = "running"
-        session["job"]["started_at"] = datetime.utcnow().isoformat()
 
-        cam1_path = session["CAM-1"]
-        cam2_path = session["CAM-2"]
+def _task_payload(session_id: str) -> dict[str, Any]:
+    session = app.state.sessions.get(session_id)
+    if not session:
+        return {
+            "state": "not_found",
+            "progress_percent": 0,
+            "processed_frames": 0,
+            "total_frames": 1,
+            "alerts_count": 0,
+            "alerts": [],
+            "latest_boxes": {"CAM-1": None, "CAM-2": None},
+            "error": "Session not found",
+        }
 
-        import cv2
+    task = _session_task(session_id)
+    if task is None:
+        return {
+            "state": "pending",
+            "progress_percent": 0,
+            "processed_frames": 0,
+            "total_frames": 1,
+            "alerts_count": 0,
+            "alerts": [],
+            "latest_boxes": {"CAM-1": None, "CAM-2": None},
+            "error": None,
+        }
 
-        cap1 = cv2.VideoCapture(cam1_path)
-        cap2 = cv2.VideoCapture(cam2_path)
-        cam1_total = int(cap1.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        cam2_total = int(cap2.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        cap1.release()
-        cap2.release()
+    info = task.info if isinstance(task.info, dict) else {}
+    state = str(task.state or "PENDING").lower()
 
-        total_frames = max(1, cam1_total + cam2_total)
-        session["job"]["total_frames"] = total_frames
-        session["job"]["processed_frames"] = 0
-        session["job"]["progress_percent"] = 0
-        session["job"]["current_camera"] = "CAM-1"
+    payload: dict[str, Any] = {
+        "state": state,
+        "progress_percent": int(info.get("progress_percent") or 0),
+        "processed_frames": int(info.get("processed_frames") or 0),
+        "total_frames": max(1, int(info.get("total_frames") or 1)),
+        "alerts_count": int(info.get("alerts_count") or 0),
+        "latest_boxes": info.get("latest_boxes") or {"CAM-1": None, "CAM-2": None},
+        "profile": session.get("profile", "balanced"),
+        "current_camera": info.get("current_camera", "CAM-1"),
+        "error": info.get("error"),
+        "alerts": info.get("alerts") or [],
+    }
 
-        lock = threading.Lock()
-        profile = session.get("profile", "balanced")
-
-        async def run_camera(camera_id: str, path: str):
-            await asyncio.to_thread(
-                analyze_video_alerts,
-                path,
-                camera_id,
-                session["target_encoding"],
-                session["alerts"],
-                profile=profile,
-                progress=session["job"],
-                progress_lock=lock,
-            )
-
-        await asyncio.gather(
-            run_camera("CAM-1", cam1_path),
-            run_camera("CAM-2", cam2_path),
+    if task.successful():
+        result = task.result if isinstance(task.result, dict) else {}
+        payload.update(
+            {
+                "state": str(result.get("state") or "completed"),
+                "progress_percent": int(result.get("progress_percent") or 100),
+                "processed_frames": int(result.get("processed_frames") or payload["processed_frames"]),
+                "total_frames": max(1, int(result.get("total_frames") or payload["total_frames"])),
+                "alerts_count": int(result.get("alerts_count") or 0),
+                "alerts": result.get("alerts") or [],
+                "profile": result.get("profile") or payload["profile"],
+                "error": None,
+            }
         )
+    elif task.failed():
+        payload["state"] = "failed"
+        payload["error"] = str(task.result)
 
-        session["alerts"].sort(key=lambda alert: (alert.get("timestamp", ""), alert.get("camera", "")))
-        session["job"]["processed_frames"] = total_frames
-        session["job"]["progress_percent"] = 100
-        session["job"]["state"] = "completed"
-        session["job"]["completed_at"] = datetime.utcnow().isoformat()
-    except Exception as exc:
-        session["job"]["state"] = "failed"
-        session["job"]["error"] = str(exc)
-    finally:
-        app.state.session_tasks.pop(session_id, None)
+    return payload
 
 @app.post("/api/analyze")
 async def analyze_surveillance(
@@ -114,45 +139,41 @@ async def analyze_surveillance(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-        temp_dir = tempfile.mkdtemp()
-        cam1_path = os.path.join(temp_dir, "cam1.mp4")
-        cam2_path = os.path.join(temp_dir, "cam2.mp4")
+        session_id = str(uuid.uuid4())
+        temp_dir = _build_session_workdir(session_id)
+        cam1_path = str(temp_dir / "cam1.mp4")
+        cam2_path = str(temp_dir / "cam2.mp4")
 
         with open(cam1_path, "wb") as buffer:
             shutil.copyfileobj(cam1_video.file, buffer)
         with open(cam2_path, "wb") as buffer:
             shutil.copyfileobj(cam2_video.file, buffer)
 
-        session_id = str(uuid.uuid4())
         normalized_profile = profile.strip().lower() if profile else "balanced"
         if normalized_profile not in {"fast", "balanced", "accurate"}:
             normalized_profile = "balanced"
 
+        task = analyze_surveillance_task.delay(
+            session_id=session_id,
+            cam1_path=cam1_path,
+            cam2_path=cam2_path,
+            target_encoding=target_encoding.tolist(),
+            profile=normalized_profile,
+        )
+
         app.state.sessions[session_id] = {
-            "target_encoding": target_encoding,
             "CAM-1": cam1_path,
             "CAM-2": cam2_path,
-            "alerts": [],
             "profile": normalized_profile,
-            "job": {
-                "state": "pending",
-                "progress_percent": 0,
-                "processed_frames": 0,
-                "total_frames": 1,
-                "current_camera": "CAM-1",
-                "error": None,
-                "started_at": None,
-                "completed_at": None,
-            },
+            "task_id": task.id,
+            "created_at": datetime.utcnow().isoformat(),
         }
-
-        task = asyncio.create_task(_run_session_analysis(session_id))
-        app.state.session_tasks[session_id] = task
         
         return {
             "status": "success",
             "session_id": session_id,
             "profile": normalized_profile,
+            "task_id": task.id,
             "job_state": "pending",
         }
 
@@ -175,46 +196,46 @@ async def stream_video(session_id: str, cam_id: str):
 
 @app.get("/api/alerts/{session_id}")
 def get_alerts(session_id: str):
-    if session_id not in app.state.sessions:
-        return {"alerts": []}
-    session = app.state.sessions[session_id]
+    payload = _task_payload(session_id)
     return {
-        "alerts": session["alerts"],
-        "job_state": session.get("job", {}).get("state", "pending"),
-        "profile": session.get("profile", "balanced"),
+        "alerts": payload.get("alerts", []),
+        "job_state": payload.get("state", "pending"),
+        "profile": payload.get("profile", "balanced"),
+        "latest_boxes": payload.get("latest_boxes", {"CAM-1": None, "CAM-2": None}),
     }
 
 
 @app.get("/api/progress/{session_id}")
 def get_progress(session_id: str):
-    if session_id not in app.state.sessions:
-        return {
-            "state": "not_found",
-            "progress_percent": 0,
-            "processed_frames": 0,
-            "total_frames": 1,
-            "alerts_count": 0,
-        }
-
-    session = app.state.sessions[session_id]
-    job = session.get("job", {})
-    total = max(1, int(job.get("total_frames", 1)))
-    processed = max(0, min(total, int(job.get("processed_frames", 0))))
-    progress_percent = min(100, int((processed / total) * 100))
-    job["progress_percent"] = progress_percent
-
+    payload = _task_payload(session_id)
     return {
-        "state": job.get("state", "pending"),
-        "progress_percent": progress_percent,
-        "processed_frames": processed,
-        "total_frames": total,
-        "current_camera": job.get("current_camera", "CAM-1"),
-        "alerts_count": len(session.get("alerts", [])),
-        "profile": session.get("profile", "balanced"),
-        "error": job.get("error"),
-        "started_at": job.get("started_at"),
-        "completed_at": job.get("completed_at"),
+        "state": payload.get("state", "pending"),
+        "progress_percent": payload.get("progress_percent", 0),
+        "processed_frames": payload.get("processed_frames", 0),
+        "total_frames": payload.get("total_frames", 1),
+        "current_camera": payload.get("current_camera", "CAM-1"),
+        "alerts_count": payload.get("alerts_count", 0),
+        "profile": payload.get("profile", "balanced"),
+        "error": payload.get("error"),
+        "latest_boxes": payload.get("latest_boxes", {"CAM-1": None, "CAM-2": None}),
     }
+
+
+@app.websocket("/ws/session/{session_id}")
+async def session_ws(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    try:
+        while True:
+            payload = _task_payload(session_id)
+            await websocket.send_json(payload)
+            state = str(payload.get("state", "pending")).lower()
+            if state in {"completed", "failed", "error", "not_found"}:
+                break
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        await websocket.close(code=1011)
 
 
 @app.get("/api/snapshots/{session_id}/{filename}")
@@ -243,15 +264,16 @@ class ResetRequest(BaseModel):
 @app.post("/api/system/reset-workspace")
 async def reset_workspace(payload: ResetRequest):
     if payload.session_id:
-        task = app.state.session_tasks.pop(payload.session_id, None)
-        if task and not task.done():
-            task.cancel()
+        session = app.state.sessions.get(payload.session_id)
+        task_id = session.get("task_id") if session else None
+        if task_id:
+            celery_app.control.revoke(task_id, terminate=True)
         app.state.sessions.pop(payload.session_id, None)
     else:
-        for task in list(app.state.session_tasks.values()):
-            if task and not task.done():
-                task.cancel()
-        app.state.session_tasks.clear()
+        for session in list(app.state.sessions.values()):
+            task_id = session.get("task_id")
+            if task_id:
+                celery_app.control.revoke(task_id, terminate=True)
         app.state.sessions.clear()
 
     workspace_root = Path(__file__).resolve().parents[1]

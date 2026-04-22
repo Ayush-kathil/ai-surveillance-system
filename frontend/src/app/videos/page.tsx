@@ -1,65 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BackArrow } from "../back-arrow";
 import { BrandMark } from "../brand-mark";
 import { useWorkflow } from "../workflow-provider";
 
 export default function VideosPage() {
   const router = useRouter();
-  const { cam1, cam2, setCam1, setCam2, cam1Preview, cam2Preview, setStep, uploadKey } = useWorkflow();
+  const { cam1, cam2, setCam1, setCam2, cam1Preview, cam2Preview, setStep, uploadKey, uploadProgress, loading } = useWorkflow();
   const [dragTarget, setDragTarget] = useState<"cam1" | "cam2" | null>(null);
-  const [cam1Progress, setCam1Progress] = useState(0);
-  const [cam2Progress, setCam2Progress] = useState(0);
-
-  useEffect(() => {
-    if (!cam1) {
-      setCam1Progress(0);
-      return;
-    }
-
-    setCam1Progress(0);
-    const durationMs = Math.min(2200, Math.max(750, Math.round((cam1.size / (1024 * 1024)) * 170)));
-    const startedAt = performance.now();
-    let frameId = 0;
-
-    const step = (now: number) => {
-      const progress = Math.min(1, (now - startedAt) / durationMs);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setCam1Progress(Math.round(eased * 100));
-      if (progress < 1) {
-        frameId = window.requestAnimationFrame(step);
-      }
-    };
-
-    frameId = window.requestAnimationFrame(step);
-    return () => window.cancelAnimationFrame(frameId);
-  }, [cam1]);
-
-  useEffect(() => {
-    if (!cam2) {
-      setCam2Progress(0);
-      return;
-    }
-
-    setCam2Progress(0);
-    const durationMs = Math.min(2200, Math.max(750, Math.round((cam2.size / (1024 * 1024)) * 170)));
-    const startedAt = performance.now();
-    let frameId = 0;
-
-    const step = (now: number) => {
-      const progress = Math.min(1, (now - startedAt) / durationMs);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setCam2Progress(Math.round(eased * 100));
-      if (progress < 1) {
-        frameId = window.requestAnimationFrame(step);
-      }
-    };
-
-    frameId = window.requestAnimationFrame(step);
-    return () => window.cancelAnimationFrame(frameId);
-  }, [cam2]);
 
   return (
     <main className="relative h-[100dvh] overflow-hidden text-black">
@@ -100,7 +50,8 @@ export default function VideosPage() {
                 label="Camera feed 1"
                 hint="Video source for CAM-1."
                 fileName={cam1?.name}
-                progress={cam1Progress}
+                progress={uploadProgress.cam1}
+                loading={loading}
                 dragActive={dragTarget === "cam1"}
                 onDragOver={(event) => {
                   event.preventDefault();
@@ -122,7 +73,8 @@ export default function VideosPage() {
                 label="Camera feed 2"
                 hint="Video source for CAM-2."
                 fileName={cam2?.name}
-                progress={cam2Progress}
+                progress={uploadProgress.cam2}
+                loading={loading}
                 dragActive={dragTarget === "cam2"}
                 onDragOver={(event) => {
                   event.preventDefault();
@@ -153,7 +105,7 @@ export default function VideosPage() {
                 type="button"
                 onClick={() => {
                   setStep(3);
-                  router.push("/review");
+                  router.push("/dashboard");
                 }}
                 disabled={!cam1 || !cam2}
                 className="inline-flex items-center justify-center rounded-full bg-black px-5 py-2.5 text-sm font-semibold text-white transition duration-300 hover:-translate-y-0.5 hover:bg-black/90 hover:shadow-[0_8px_20px_rgba(0,0,0,0.24)] disabled:cursor-not-allowed disabled:bg-black/25"
@@ -216,6 +168,7 @@ function UploadCard({
   onDragLeave,
   onDrop,
   onChange,
+  loading,
 }: {
   keyName: string;
   label: string;
@@ -227,6 +180,7 @@ function UploadCard({
   onDragLeave?: () => void;
   onDrop?: (event: React.DragEvent<HTMLLabelElement>) => void;
   onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  loading: boolean;
 }) {
   return (
     <label
@@ -254,6 +208,9 @@ function UploadCard({
           <div className="h-2 overflow-hidden rounded-full border border-black/10 bg-white">
             <div className="h-full rounded-full bg-black transition-all duration-300" style={{ width: `${progress}%` }} />
           </div>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-black/45">
+            {loading ? "Uploading bytes to backend" : "Upload starts when analysis begins"}
+          </p>
         </div>
       )}
     </label>

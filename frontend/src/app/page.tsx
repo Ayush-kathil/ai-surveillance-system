@@ -39,10 +39,10 @@ export default function Home() {
               <span className="ml-2 transition duration-300 group-hover:translate-x-0.5">→</span>
             </Link>
             <Link
-              href="/review"
+              href="/dashboard"
               className="inline-flex items-center justify-center rounded-full border border-black/20 bg-white/90 px-7 py-3 text-sm font-semibold text-black transition duration-300 hover:-translate-y-0.5 hover:bg-white"
             >
-              Open Review Console
+              Open Command Center
             </Link>
           </div>
 

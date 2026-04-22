@@ -11,6 +11,31 @@ type AlertItem = {
   euclidean_distance?: number;
   snapshot?: string;
   bounding_box?: [number, number, number, number] | null;
+  track_id?: number | null;
+};
+
+type UploadProgress = {
+  missingImage: number;
+  cam1: number;
+  cam2: number;
+  total: number;
+};
+
+type LiveBox = {
+  camera: "CAM-1" | "CAM-2";
+  frame_index: number;
+  bbox: [number, number, number, number] | null;
+  track_id?: number | null;
+  score?: number | null;
+};
+
+type SessionWsPayload = {
+  state?: string;
+  progress_percent?: number;
+  alerts?: AlertItem[];
+  latest_boxes?: Partial<Record<"CAM-1" | "CAM-2", LiveBox | null>>;
+  profile?: string;
+  error?: string | null;
 };
 
 type SystemStatus = "booting" | "online" | "offline";
@@ -52,6 +77,10 @@ type WorkflowState = {
   progress: number;
   backendProgress: number;
   jobState: string;
+  wsConnected: boolean;
+  wsReconnecting: boolean;
+  latestBoxes: Partial<Record<"CAM-1" | "CAM-2", LiveBox | null>>;
+  uploadProgress: UploadProgress;
   analysisProfile: AnalysisProfile;
   setAnalysisProfile: (profile: AnalysisProfile) => void;
   missingPreview: string | null;
@@ -156,6 +185,18 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [analysisProfile, setAnalysisProfile] = useState<AnalysisProfile>("balanced");
   const [backendProgress, setBackendProgress] = useState(0);
   const [jobState, setJobState] = useState<string>("idle");
+  const [wsConnected, setWsConnected] = useState(false);
+  const [wsReconnecting, setWsReconnecting] = useState(false);
+  const [latestBoxes, setLatestBoxes] = useState<Partial<Record<"CAM-1" | "CAM-2", LiveBox | null>>>({
+    "CAM-1": null,
+    "CAM-2": null,
+  });
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({
+    missingImage: 0,
+    cam1: 0,
+    cam2: 0,
+    total: 0,
+  });
 
   const missingPreview = useObjectUrl(missingImage);
   const cam1Preview = useObjectUrl(cam1);
@@ -204,46 +245,115 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!sessionId) return;
 
-    const pollProgress = async () => {
-      try {
-        const response = await fetchWithTimeout(`${BACKEND_URL}/api/progress/${sessionId}`);
-        if (!response.ok) return;
-        const data = await response.json();
-        setBackendProgress(Number(data.progress_percent ?? 0));
-        setJobState(String(data.state ?? "running"));
-      } catch {
-        // Keep previous progress value on transient fetch errors.
+    const wsUrl = `${BACKEND_URL.replace(/^http/, "ws")}/ws/session/${sessionId}`;
+    let socket: WebSocket | null = null;
+    let reconnectTimeoutId: number | null = null;
+    let reconnectAttempts = 0;
+    let closedByEffect = false;
+
+    const maxBackoffMs = 15000;
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimeoutId !== null) {
+        window.clearTimeout(reconnectTimeoutId);
+        reconnectTimeoutId = null;
       }
     };
 
-    pollProgress();
-    const progressInterval = window.setInterval(pollProgress, 1000);
+    const scheduleReconnect = () => {
+      if (closedByEffect) {
+        return;
+      }
+      reconnectAttempts += 1;
+      setWsConnected(false);
+      setWsReconnecting(true);
+
+      const jitterMs = Math.floor(Math.random() * 250);
+      const backoffMs = Math.min(maxBackoffMs, 500 * (2 ** Math.max(0, reconnectAttempts - 1))) + jitterMs;
+
+      reconnectTimeoutId = window.setTimeout(() => {
+        connect();
+      }, backoffMs);
+    };
+
+    const onPayload = (data: SessionWsPayload) => {
+      setBackendProgress(Number(data.progress_percent ?? 0));
+      setJobState(String(data.state ?? "running"));
+      if (Array.isArray(data.alerts)) {
+        setAlerts(data.alerts);
+      }
+      if (data.latest_boxes) {
+        setLatestBoxes({
+          "CAM-1": data.latest_boxes["CAM-1"] ?? null,
+          "CAM-2": data.latest_boxes["CAM-2"] ?? null,
+        });
+      }
+      if (typeof data.profile === "string") {
+        setAnalysisProfile(normalizeProfile(data.profile));
+      }
+      if (data.error) {
+        setBackendError(String(data.error));
+      } else {
+        setBackendError(null);
+      }
+    };
+
+    const connect = () => {
+      clearReconnectTimer();
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        reconnectAttempts = 0;
+        setWsConnected(true);
+        setWsReconnecting(false);
+        setStatus("online");
+        setBackendError(null);
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data) as SessionWsPayload;
+          onPayload(data);
+        } catch {
+          setBackendError("WebSocket payload parse failed.");
+        }
+      };
+
+      socket.onerror = () => {
+        setWsConnected(false);
+      };
+
+      socket.onclose = () => {
+        setWsConnected(false);
+        scheduleReconnect();
+      };
+    };
+
+    connect();
 
     const pollAlerts = async () => {
       try {
         const response = await fetchWithTimeout(`${BACKEND_URL}/api/alerts/${sessionId}`);
-        if (response.ok) {
-          const data = await response.json();
-          setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
-          if (typeof data.profile === "string") {
-            setAnalysisProfile(normalizeProfile(data.profile));
-          }
-          setBackendError(null);
-          setStatus("online");
-        } else {
-          setBackendError("Alert endpoint returned an error response.");
+        if (!response.ok) {
+          return;
         }
+        const data = await response.json();
+        setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
       } catch {
-        setStatus("offline");
-        setBackendError("Live alert polling lost connection to backend.");
+        // Alerts continue over websocket; polling is fallback only.
       }
     };
 
     pollAlerts();
-    const interval = window.setInterval(pollAlerts, 1000);
+    const interval = window.setInterval(pollAlerts, 2500);
     return () => {
+      closedByEffect = true;
+      clearReconnectTimer();
+      setWsReconnecting(false);
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
+      }
       window.clearInterval(interval);
-      window.clearInterval(progressInterval);
     };
   }, [sessionId]);
 
@@ -255,6 +365,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setResetInfo(null);
     setBackendProgress(0);
     setJobState("idle");
+    setWsConnected(false);
+    setWsReconnecting(false);
+    setLatestBoxes({ "CAM-1": null, "CAM-2": null });
+    setUploadProgress({ missingImage: 0, cam1: 0, cam2: 0, total: 0 });
   };
 
   const handleResetPlatform = async () => {
@@ -305,6 +419,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     setAlerts([]);
+    setUploadProgress({ missingImage: 0, cam1: 0, cam2: 0, total: 0 });
 
     const formData = new FormData();
     formData.append("missing_image", missingImage);
@@ -313,17 +428,26 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     formData.append("profile", analysisProfile);
 
     try {
-      const response = await fetch(`${BACKEND_URL}/api/analyze`, {
-        method: "POST",
-        body: formData,
-      });
+      const totalPayloadBytes = Math.max(1, missingImage.size + cam1.size + cam2.size);
+      const data = await uploadAnalyzeRequest(
+        `${BACKEND_URL}/api/analyze`,
+        formData,
+        (loaded, total) => {
+          const safeTotal = Math.max(totalPayloadBytes, total || totalPayloadBytes);
+          const normalized = Math.max(0, Math.min(1, loaded / safeTotal));
+          const missingRatio = missingImage.size / totalPayloadBytes;
+          const cam1Ratio = cam1.size / totalPayloadBytes;
+          const cam2Ratio = cam2.size / totalPayloadBytes;
 
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.detail || "The backend could not start the analysis.");
-      }
+          setUploadProgress({
+            missingImage: Math.min(100, Math.round((normalized * missingRatio * totalPayloadBytes / Math.max(1, missingImage.size)) * 100)),
+            cam1: Math.min(100, Math.round((normalized * cam1Ratio * totalPayloadBytes / Math.max(1, cam1.size)) * 100)),
+            cam2: Math.min(100, Math.round((normalized * cam2Ratio * totalPayloadBytes / Math.max(1, cam2.size)) * 100)),
+            total: Math.min(100, Math.round(normalized * 100)),
+          });
+        },
+      );
 
-      const data = await response.json();
       setSessionId(data.session_id);
       setBackendProgress(0);
       setJobState(String(data.job_state ?? "pending"));
@@ -331,6 +455,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       setBackendError(null);
       setStatus("online");
       setStep(3);
+      setUploadProgress({ missingImage: 100, cam1: 100, cam2: 100, total: 100 });
     } catch (runError) {
       setStatus("offline");
       setError(runError instanceof Error ? runError.message : "Unexpected frontend error.");
@@ -560,6 +685,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     progress,
     backendProgress,
     jobState,
+    wsConnected,
+    wsReconnecting,
+    latestBoxes,
+    uploadProgress,
     analysisProfile,
     setAnalysisProfile,
     missingPreview,
@@ -590,6 +719,44 @@ async function blobToDataUrl(blob: Blob) {
     reader.onloadend = () => resolve(String(reader.result));
     reader.onerror = () => reject(new Error("Failed to read snapshot image."));
     reader.readAsDataURL(blob);
+  });
+}
+
+async function uploadAnalyzeRequest(
+  url: string,
+  formData: FormData,
+  onUploadProgress: (loaded: number, total: number) => void,
+): Promise<{ session_id: string; profile: string; job_state: string }> {
+  return await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.responseType = "json";
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) {
+        onUploadProgress(event.loaded, 0);
+        return;
+      }
+      onUploadProgress(event.loaded, event.total);
+    };
+
+    xhr.onerror = () => reject(new Error("Upload failed due to a network error."));
+    xhr.onabort = () => reject(new Error("Upload aborted."));
+
+    xhr.onload = () => {
+      const payload = (xhr.response ?? {}) as { session_id?: string; profile?: string; job_state?: string; detail?: string };
+      if (xhr.status < 200 || xhr.status >= 300 || !payload.session_id) {
+        reject(new Error(payload.detail || "The backend could not start the analysis."));
+        return;
+      }
+      resolve({
+        session_id: payload.session_id,
+        profile: payload.profile ?? "balanced",
+        job_state: payload.job_state ?? "pending",
+      });
+    };
+
+    xhr.send(formData);
   });
 }
 

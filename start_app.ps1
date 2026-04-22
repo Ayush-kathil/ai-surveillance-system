@@ -1,45 +1,58 @@
-# FAST Execution Command for the Surveillance App
-Write-Host "Cleaning up previous sessions..." -ForegroundColor Yellow
-# Kill any process on port 8001 (Backend) or 3000 (Frontend)
-try {
-    $port8001 = Get-NetTCPConnection -LocalPort 8001 -ErrorAction SilentlyContinue
-    if ($port8001) { Stop-Process -Id $port8001.OwningProcess -Force }
-    $port3000 = Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue
-    if ($port3000) { Stop-Process -Id $port3000.OwningProcess -Force }
-} catch { }
+param(
+    [switch]$NoCache,
+    [switch]$NoBuild
+)
 
-Write-Host "Starting Surveillance AI System..." -ForegroundColor Green
+$ErrorActionPreference = "Stop"
 
-# 1. Start FastApi Backend
-Write-Host "Initializing Backend Engine..." -ForegroundColor Cyan
-if (Test-Path ".venv\Scripts\Activate.ps1") {
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd backend; ..\.venv\Scripts\Activate.ps1; uvicorn app:app --port 8001" -WindowStyle Normal
-} else {
-    Write-Host "Warning: Virtual environment not found. Running with system python." -ForegroundColor Yellow
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd backend; uvicorn app:app --port 8001" -WindowStyle Normal
+function Assert-Docker {
+    $null = Get-Command docker -ErrorAction Stop
+    docker-compose version | Out-Null
 }
 
-# 2. Waiting for Backend to be ready
+Write-Host "Verifying Docker tooling..." -ForegroundColor Cyan
+Assert-Docker
+
+Write-Host "Stopping existing surveillance containers..." -ForegroundColor Yellow
+docker-compose down --remove-orphans
+
+if (-not $NoBuild) {
+    Write-Host "Building stack images..." -ForegroundColor Cyan
+    if ($NoCache) {
+        docker-compose build --no-cache
+    } else {
+        docker-compose build
+    }
+}
+
+Write-Host "Starting stack in detached mode..." -ForegroundColor Green
+docker-compose up -d
+
 Write-Host "Waiting for backend health check (http://localhost:8001/health)..." -ForegroundColor Magenta
-$retries = 20
+$retries = 45
 $ready = $false
 while ($retries -gt 0 -and -not $ready) {
     try {
         $response = Invoke-RestMethod -Uri "http://localhost:8001/health" -ErrorAction Stop
         if ($response.status -eq "Online") {
             $ready = $true
-            Write-Host "Backend is ONLINE!" -ForegroundColor Green
+            Write-Host "Backend is ONLINE." -ForegroundColor Green
+            break
         }
     } catch {
         Write-Host "." -NoNewline
-        Start-Sleep -Seconds 1
+        Start-Sleep -Seconds 2
         $retries--
     }
 }
 
-# 3. Start Next.js Frontend
-Write-Host "Initializing Next.js User Interface..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd frontend; npm run dev" -WindowStyle Normal
+if (-not $ready) {
+    Write-Host "Backend health check timed out. Showing compose status:" -ForegroundColor Red
+    docker-compose ps
+    exit 1
+}
 
-Write-Host "System is starting up!" -ForegroundColor Green
-Write-Host "Interface will be ready at http://localhost:3000" -ForegroundColor White
+Write-Host "Stack is ready." -ForegroundColor Green
+Write-Host "Frontend: http://localhost:3000" -ForegroundColor White
+Write-Host "Backend:  http://localhost:8001" -ForegroundColor White
+Write-Host "Logs:     docker-compose logs -f" -ForegroundColor White
