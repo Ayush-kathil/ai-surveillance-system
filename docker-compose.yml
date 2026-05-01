@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   redis:
     image: redis:7-alpine
@@ -28,9 +26,11 @@ services:
       SHARED_SESSIONS_DIR: /shared/sessions
       MATCH_SNAPSHOT_DIR: /app/output/snapshots
       YOLO_MODEL_PATH: /models/yolov8n.pt
+      DATA_RETENTION_HOURS: "4"
     volumes:
       - ./backend:/app
       - ./data:/models
+      - deepface_cache:/root/.deepface
       - sessions_data:/shared/sessions
       - output_data:/app/output
     ports:
@@ -52,9 +52,11 @@ services:
       SHARED_SESSIONS_DIR: /shared/sessions
       MATCH_SNAPSHOT_DIR: /app/output/snapshots
       YOLO_MODEL_PATH: /models/yolov8n.pt
+      DATA_RETENTION_HOURS: "4"
     volumes:
       - ./backend:/app
       - ./data:/models
+      - deepface_cache:/root/.deepface
       - sessions_data:/shared/sessions
       - output_data:/app/output
     depends_on:
@@ -65,6 +67,29 @@ services:
     command: celery -A tasks.celery_app worker --loglevel=INFO --concurrency=1
     restart: unless-stopped
 
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: surveillance_celery_beat
+    environment:
+      REDIS_BROKER_URL: redis://redis:6379/0
+      REDIS_RESULT_BACKEND: redis://redis:6379/0
+      SHARED_SESSIONS_DIR: /shared/sessions
+      MATCH_SNAPSHOT_DIR: /app/output/snapshots
+      YOLO_MODEL_PATH: /models/yolov8n.pt
+      DATA_RETENTION_HOURS: "4"
+    volumes:
+      - ./backend:/app
+      - ./data:/models
+      - sessions_data:/shared/sessions
+      - output_data:/app/output
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A tasks.celery_app beat --loglevel=INFO
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend
@@ -73,19 +98,16 @@ services:
     environment:
       NEXT_PUBLIC_BACKEND_URL: http://localhost:8001
       NODE_ENV: production
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
     ports:
       - "3000:3000"
     depends_on:
       backend:
         condition: service_started
-    command: sh -c "npm install && npm run build && npm run start"
+    command: npm run start
     restart: unless-stopped
 
 volumes:
   redis_data:
   sessions_data:
   output_data:
+  deepface_cache:

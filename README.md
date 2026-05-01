@@ -120,17 +120,28 @@ Profile behavior is mapped server-side in `backend/engine.py` and can be tuned t
 
 ## Local Setup
 
-### One-command setup/start (recommended)
+### One-time setup + run-only startup (recommended)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup_system.ps1
-powershell -ExecutionPolicy Bypass -File .\start_app.ps1
 ```
 
-### Clean full run
+After setup is done, daily startup is run-only (no install/build):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run_full_project.ps1
+```
+
+### Clean full run (run-only)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_full_project.ps1
+```
+
+### Rebuild images (only when code/dependencies change)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start_app.ps1 -Build
 ```
 
 ### Frontend only

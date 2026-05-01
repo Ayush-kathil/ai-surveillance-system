@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 from deepface import DeepFace
 from ultralytics import YOLO
+from logger_config import logger
 
 try:
     import torch
@@ -148,6 +149,9 @@ def get_yolo_model() -> YOLO:
 def warm_up_models() -> None:
     DeepFace.build_model(FACE_MODEL_NAME)
     get_yolo_model()
+    logger.bind(event="models_warmed", face_model=FACE_MODEL_NAME, tracker=TRACKER_TYPE).info(
+        "Models warmed successfully"
+    )
 
 
 def _represent_face(
@@ -301,6 +305,7 @@ def _save_match_snapshot(
     snapshot_path = SNAPSHOT_DIR / f"{camera_id}_{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
 
     marked_frame = frame.copy()
+    marked_frame = _blur_non_target_faces(marked_frame, location)
     if location is not None:
         x1, y1, x2, y2 = location
         x1 = max(0, min(int(x1), marked_frame.shape[1] - 1))
@@ -331,6 +336,62 @@ def _save_match_snapshot(
     return snapshot_path
 
 
+def _overlaps_target(face_area: tuple[int, int, int, int], target: tuple[int, int, int, int] | None) -> bool:
+    if target is None:
+        return False
+
+    fx1, fy1, fx2, fy2 = face_area
+    tx1, ty1, tx2, ty2 = target
+    inter_left = max(fx1, tx1)
+    inter_top = max(fy1, ty1)
+    inter_right = min(fx2, tx2)
+    inter_bottom = min(fy2, ty2)
+    return inter_left < inter_right and inter_top < inter_bottom
+
+
+def _blur_non_target_faces(
+    frame: np.ndarray,
+    target_location: tuple[int, int, int, int] | None,
+) -> np.ndarray:
+    try:
+        faces = DeepFace.extract_faces(
+            img_path=frame,
+            detector_backend=TRACK_FACE_DETECTOR_BACKEND,
+            enforce_detection=False,
+            align=False,
+        )
+    except Exception:
+        return frame
+
+    output = frame.copy()
+    for face in faces:
+        facial_area = face.get("facial_area") or {}
+        x = int(facial_area.get("x") or 0)
+        y = int(facial_area.get("y") or 0)
+        w = int(facial_area.get("w") or 0)
+        h = int(facial_area.get("h") or 0)
+        if w <= 0 or h <= 0:
+            continue
+
+        x1 = max(0, x)
+        y1 = max(0, y)
+        x2 = min(output.shape[1], x + w)
+        y2 = min(output.shape[0], y + h)
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        if _overlaps_target((x1, y1, x2, y2), target_location):
+            continue
+
+        roi = output[y1:y2, x1:x2]
+        if roi.size == 0:
+            continue
+        blurred_roi = cv2.GaussianBlur(roi, (31, 31), 0)
+        output[y1:y2, x1:x2] = blurred_roi
+
+    return output
+
+
 def _append_match_alert(
     alerts_list: list[dict[str, Any]],
     *,
@@ -355,6 +416,13 @@ def _append_match_alert(
         track_id=track_id,
     )
     alerts_list.append(alert.__dict__)
+    logger.bind(
+        event="match_threshold_crossed",
+        camera=camera_id,
+        score=round(score, 4),
+        track_id=track_id,
+        video_timestamp=video_timestamp,
+    ).info("Match threshold crossed")
 
 
 def _get_or_cache_track_embedding(

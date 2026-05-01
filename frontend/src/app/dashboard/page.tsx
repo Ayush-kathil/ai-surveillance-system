@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { BackArrow } from "../back-arrow";
 import { BrandMark } from "../brand-mark";
@@ -15,7 +15,11 @@ type BoxPayload = {
   score?: number | null;
 };
 
+const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8001").replace(/\/+$/, "");
+
 export default function DashboardPage() {
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const {
     sessionId,
     alerts,
@@ -40,6 +44,35 @@ export default function DashboardPage() {
   useEffect(() => {
     setStep(3);
   }, [setStep]);
+
+  const handleExport = async () => {
+    if (!sessionId) {
+      return;
+    }
+    setExporting(true);
+    setExportError(null);
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/export/${sessionId}`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(String(payload.detail || "Failed to export evidence."));
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = `evidence_${sessionId}.zip`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Failed to export evidence.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_18%_12%,#f6e8d7_0%,transparent_42%),radial-gradient(circle_at_87%_8%,#dce8f6_0%,transparent_42%),linear-gradient(180deg,#fdfbf7_0%,#f0ebe2_100%)] text-black">
@@ -110,6 +143,16 @@ export default function DashboardPage() {
                 <div className="h-full bg-black transition-all" style={{ width: `${backendProgress}%` }} />
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={jobState !== "completed" || exporting || !sessionId}
+              className="w-full rounded-full border border-black/15 bg-white px-4 py-2 text-sm font-semibold transition hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exporting ? "Generating export..." : "Download Evidence ZIP"}
+            </button>
+            {exportError && <Notice tone="error" message={exportError} />}
 
             <Link href="/videos" className="inline-flex w-full items-center justify-center rounded-full border border-black/15 bg-white px-4 py-2 text-sm font-semibold">
               Back To Video Uploads

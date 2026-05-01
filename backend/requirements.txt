@@ -11,3 +11,6 @@ tensorflow
 tf-keras
 celery
 redis
+loguru
+websockets
+lap
